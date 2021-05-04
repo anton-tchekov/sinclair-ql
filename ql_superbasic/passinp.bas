@@ -1,0 +1,13 @@
+90 PRINT "PASSWORD: ";
+100 DIM P$(64)
+110 REPeat passinp
+120 K$ = INKEY$(#0, -1)
+130 C% = CODE(K$)
+140 IF C% >= 32 AND C% <= 128 THEN
+150 P$(LEN(P$)+1) = K$
+160 PRINT "*";
+170 ELSE IF C% = 10 THEN 
+180 EXIT passinp
+190 END IF
+200 END REPeat passinp
+210 PRINT P$

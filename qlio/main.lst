@@ -1,0 +1,1779 @@
+   1               		.file	"main.c"
+   2               	__SP_L__ = 0x3d
+   3               	__SREG__ = 0x3f
+   4               	__tmp_reg__ = 0
+   5               	__zero_reg__ = 1
+   6               		.text
+   7               	.Ltext0:
+   8               		.cfi_sections	.debug_frame
+   9               	.global	uart_receive
+  11               	uart_receive:
+  12               	.LFB8:
+  13               		.file 1 "main.c"
+   1:main.c        **** /* make */
+   2:main.c        **** /* sudo avrdude -p t2313 -c avr910 -P /dev/ttyUSB0 -U flash:w:main.hex */
+   3:main.c        **** 
+   4:main.c        **** #include <avr/io.h>
+   5:main.c        **** #include <avr/interrupt.h>
+   6:main.c        **** #include <stdlib.h>
+   7:main.c        **** 
+   8:main.c        **** #define BUFLEN  66
+   9:main.c        **** 
+  10:main.c        **** #define BAUD   191 /* baudrate prescaler, for baudrate 2400 */
+  11:main.c        **** 
+  12:main.c        **** #define OUTPUT   0
+  13:main.c        **** #define INPUT    1
+  14:main.c        **** #define TOGGLE   2
+  15:main.c        **** #define HIGH     3
+  16:main.c        **** #define LOW      4
+  17:main.c        **** #define READ     5
+  18:main.c        **** 
+  19:main.c        **** /* function definitions */
+  20:main.c        **** unsigned char rwpin(unsigned char, unsigned char);
+  21:main.c        **** unsigned char read_ana_comp(void);
+  22:main.c        **** unsigned char uart_receive(void);
+  23:main.c        **** void uart_transmit(unsigned char);
+  24:main.c        **** void setpwm(unsigned char, unsigned char);
+  25:main.c        **** void outstr(char *, void (*)(unsigned char));
+  26:main.c        **** char *instr(char *, unsigned char, char, unsigned char (*)(void));
+  27:main.c        **** 
+  28:main.c        **** int main(void)
+  29:main.c        **** {
+  30:main.c        **** 	unsigned char cpc = 0;
+  31:main.c        **** 	unsigned char iv = 0;
+  32:main.c        **** 	char inbuf[BUFLEN];
+  33:main.c        **** 	char *cv;
+  34:main.c        **** 
+  35:main.c        **** 	/* uart: 8 data bits, no parity, 1 stop bit (8N1) */
+  36:main.c        **** 	UBRRH = (unsigned char)(BAUD >> 8);
+  37:main.c        **** 	UBRRL = (unsigned char)BAUD;
+  38:main.c        **** 
+  39:main.c        **** 	UCSRB = (1 << RXEN) | (1 << TXEN);
+  40:main.c        **** 	UCSRC = (1 << UCSZ1) | (1 << UCSZ0);
+  41:main.c        **** 
+  42:main.c        **** 	/* pwm */
+  43:main.c        **** 	TCCR0A = (1 << WGM01) | (1 << WGM00); /* | (1 << COM0A1) | (1 << COM0B1); */
+  44:main.c        **** 	TCCR0B = (1 << CS01);
+  45:main.c        **** 
+  46:main.c        **** 	OCR0A = 0;
+  47:main.c        **** 	OCR0B = 0;
+  48:main.c        **** 
+  49:main.c        **** 	TCCR1A = (1 << WGM10); /* | (1 << COM1A1) | (1 << COM1B1); */
+  50:main.c        **** 	TCCR1B = (1 << WGM12) | (1 << CS11);
+  51:main.c        **** 
+  52:main.c        **** 	OCR1A = 0;
+  53:main.c        **** 	OCR1B = 0;
+  54:main.c        **** 
+  55:main.c        **** 	asm volatile("sei");
+  56:main.c        **** 
+  57:main.c        **** 	while(1)
+  58:main.c        **** 	{
+  59:main.c        **** 		instr(inbuf, BUFLEN, '\n', uart_receive);
+  60:main.c        **** 		cv = &(inbuf[1]);
+  61:main.c        **** 		iv = atoi(cv); /* convert string to integer */;
+  62:main.c        **** 
+  63:main.c        **** 		switch(inbuf[0])
+  64:main.c        **** 		{
+  65:main.c        **** 			case 'e':
+  66:main.c        **** 				outstr(cv, uart_transmit);
+  67:main.c        **** 				uart_transmit('\n');
+  68:main.c        **** 				break;
+  69:main.c        **** 
+  70:main.c        **** 			case 'i':
+  71:main.c        **** 				rwpin(iv, INPUT);
+  72:main.c        **** 				break;
+  73:main.c        **** 
+  74:main.c        **** 			case 'o':
+  75:main.c        **** 				rwpin(iv, OUTPUT);
+  76:main.c        **** 				break;
+  77:main.c        **** 
+  78:main.c        **** 			case 't':
+  79:main.c        **** 				rwpin(iv, TOGGLE);
+  80:main.c        **** 				break;
+  81:main.c        **** 
+  82:main.c        **** 			case 'h':
+  83:main.c        **** 				rwpin(iv, HIGH);
+  84:main.c        **** 				break;
+  85:main.c        **** 
+  86:main.c        **** 			case 'l':
+  87:main.c        **** 				rwpin(iv, LOW);
+  88:main.c        **** 				break;
+  89:main.c        **** 
+  90:main.c        **** 			case 'r':
+  91:main.c        **** 				iv = rwpin(iv, READ);
+  92:main.c        **** 				outstr(itoa(iv, inbuf, 10), uart_transmit);
+  93:main.c        **** 				uart_transmit('\n');
+  94:main.c        **** 				break;
+  95:main.c        **** 
+  96:main.c        **** 			case 'a':
+  97:main.c        **** 				iv = read_ana_comp();
+  98:main.c        **** 				outstr(itoa(iv, inbuf, 10), uart_transmit);
+  99:main.c        **** 				uart_transmit('\n');
+ 100:main.c        **** 				break;
+ 101:main.c        **** 
+ 102:main.c        **** 			case 'c':
+ 103:main.c        **** 				cpc = iv;
+ 104:main.c        **** 				break;
+ 105:main.c        **** 
+ 106:main.c        **** 			case 'p':
+ 107:main.c        **** 				setpwm(cpc, iv);
+ 108:main.c        **** 				break;
+ 109:main.c        **** 		}
+ 110:main.c        **** 	}
+ 111:main.c        **** 
+ 112:main.c        **** 	return 0;
+ 113:main.c        **** }
+ 114:main.c        **** 
+ 115:main.c        **** unsigned char read_ana_comp()
+ 116:main.c        **** {
+ 117:main.c        **** 	return ((ACSR >> ACO) & 1);
+ 118:main.c        **** }
+ 119:main.c        **** 
+ 120:main.c        **** void setpwm(unsigned char ch, unsigned char val)
+ 121:main.c        **** {
+ 122:main.c        **** 	if(ch >= 4) return;
+ 123:main.c        **** 
+ 124:main.c        **** 	if(val)
+ 125:main.c        **** 	{
+ 126:main.c        **** 		/* enable pwma and write value to register */
+ 127:main.c        **** 		switch(ch)
+ 128:main.c        **** 		{
+ 129:main.c        **** 			case 0:
+ 130:main.c        **** 				TCCR0A |= (1 << COM0A1);
+ 131:main.c        **** 				OCR0A = val;
+ 132:main.c        **** 				break;
+ 133:main.c        **** 
+ 134:main.c        **** 			case 1:
+ 135:main.c        **** 				TCCR0A |= (1 << COM0B1);
+ 136:main.c        **** 				OCR0B = val;
+ 137:main.c        **** 				break;
+ 138:main.c        **** 
+ 139:main.c        **** 			case 2:
+ 140:main.c        **** 				TCCR1A |= (1 << COM1A1);
+ 141:main.c        **** 				OCR1A = val;
+ 142:main.c        **** 				break;
+ 143:main.c        **** 
+ 144:main.c        **** 			case 3:
+ 145:main.c        **** 				TCCR1A |= (1 << COM1B1);
+ 146:main.c        **** 				OCR1B = val;
+ 147:main.c        **** 				break;
+ 148:main.c        **** 		}
+ 149:main.c        **** 	}
+ 150:main.c        **** 	else
+ 151:main.c        **** 	{
+ 152:main.c        **** 		/* disable pwm */
+ 153:main.c        **** 		switch(ch)
+ 154:main.c        **** 		{
+ 155:main.c        **** 			case 0:
+ 156:main.c        **** 				TCCR0A &= ~(1 << COM0A1);
+ 157:main.c        **** 				break;
+ 158:main.c        **** 
+ 159:main.c        **** 			case 1:
+ 160:main.c        **** 				TCCR0A &= ~(1 << COM0B1);
+ 161:main.c        **** 				break;
+ 162:main.c        **** 
+ 163:main.c        **** 			case 2:
+ 164:main.c        **** 				TCCR1A &= ~(1 << COM1A1);
+ 165:main.c        **** 				break;
+ 166:main.c        **** 
+ 167:main.c        **** 			case 3:
+ 168:main.c        **** 				TCCR1A &= ~(1 << COM1B1);
+ 169:main.c        **** 				break;
+ 170:main.c        **** 		}
+ 171:main.c        **** 	}
+ 172:main.c        **** }
+ 173:main.c        **** 
+ 174:main.c        **** /* digital io */
+ 175:main.c        **** unsigned char rwpin(unsigned char p, unsigned char a)
+ 176:main.c        **** {
+ 177:main.c        **** 	unsigned char map_pin;
+ 178:main.c        **** 	volatile unsigned char *reg_ddr;
+ 179:main.c        **** 	volatile unsigned char *reg_pin;
+ 180:main.c        **** 	volatile unsigned char *reg_port;
+ 181:main.c        **** 
+ 182:main.c        **** 	if(p >= 13) return 0;
+ 183:main.c        **** 
+ 184:main.c        **** 	if(p <= 7)
+ 185:main.c        **** 	{
+ 186:main.c        **** 		reg_ddr = &DDRB;
+ 187:main.c        **** 		reg_pin = &PINB;
+ 188:main.c        **** 		reg_port = &PORTB;
+ 189:main.c        **** 		map_pin = p;
+ 190:main.c        **** 	}
+ 191:main.c        **** 	else if(p >= 8 && p <= 12)
+ 192:main.c        **** 	{
+ 193:main.c        **** 		reg_ddr = &DDRD;
+ 194:main.c        **** 		reg_pin = &PIND;
+ 195:main.c        **** 		reg_port = &PORTD;
+ 196:main.c        **** 		map_pin = p-6;
+ 197:main.c        **** 	}
+ 198:main.c        **** 
+ 199:main.c        **** 	switch(a)
+ 200:main.c        **** 	{
+ 201:main.c        **** 		case OUTPUT:
+ 202:main.c        **** 			*reg_ddr |= (1 << map_pin);
+ 203:main.c        **** 			break;
+ 204:main.c        **** 
+ 205:main.c        **** 		case INPUT:
+ 206:main.c        **** 			*reg_ddr &= ~(1 << map_pin);
+ 207:main.c        **** 			break;
+ 208:main.c        **** 
+ 209:main.c        **** 		case TOGGLE:
+ 210:main.c        **** 			*reg_port ^= (1 << map_pin);
+ 211:main.c        **** 			break;
+ 212:main.c        **** 
+ 213:main.c        **** 		case HIGH:
+ 214:main.c        **** 			*reg_port |= (1 << map_pin);
+ 215:main.c        **** 			break;
+ 216:main.c        **** 
+ 217:main.c        **** 		case LOW:
+ 218:main.c        **** 			*reg_port &= ~(1 << map_pin);
+ 219:main.c        **** 			break;
+ 220:main.c        **** 
+ 221:main.c        **** 		case READ:
+ 222:main.c        **** 			return ((*reg_pin >> map_pin) & 1);
+ 223:main.c        **** 			break;
+ 224:main.c        **** 	}
+ 225:main.c        **** 
+ 226:main.c        **** 	return 0;
+ 227:main.c        **** }
+ 228:main.c        **** 
+ 229:main.c        **** /* uart */
+ 230:main.c        **** unsigned char uart_receive(void)
+ 231:main.c        **** {
+  14               		.loc 1 231 1 view -0
+  15               		.cfi_startproc
+  16               	/* prologue: function */
+  17               	/* frame size = 0 */
+  18               	/* stack size = 0 */
+  19               	.L__stack_usage = 0
+  20               	.L2:
+ 232:main.c        **** 	while (!(UCSRA & (1 << RXC))) { }
+  21               		.loc 1 232 34 discriminator 1 view .LVU1
+  22               		.loc 1 232 8 discriminator 1 view .LVU2
+  23 0000 5F9B      		sbis 0xb,7
+  24 0002 00C0      		rjmp .L2
+ 233:main.c        **** 	return UDR;
+  25               		.loc 1 233 2 view .LVU3
+  26               		.loc 1 233 9 is_stmt 0 view .LVU4
+  27 0004 8CB1      		in r24,0xc
+  28               	/* epilogue start */
+ 234:main.c        **** }
+  29               		.loc 1 234 1 view .LVU5
+  30 0006 0895      		ret
+  31               		.cfi_endproc
+  32               	.LFE8:
+  34               	.global	uart_transmit
+  36               	uart_transmit:
+  37               	.LFB9:
+ 235:main.c        **** 
+ 236:main.c        **** void uart_transmit(unsigned char c)
+ 237:main.c        **** {
+  38               		.loc 1 237 1 is_stmt 1 view -0
+  39               		.cfi_startproc
+  40               	/* prologue: function */
+  41               	/* frame size = 0 */
+  42               	/* stack size = 0 */
+  43               	.L__stack_usage = 0
+  44               	.LVL0:
+  45               	.L5:
+ 238:main.c        **** 	while (!(UCSRA & (1 << UDRE))) { }
+  46               		.loc 1 238 35 discriminator 1 view .LVU7
+  47               		.loc 1 238 8 discriminator 1 view .LVU8
+  48 0008 5D9B      		sbis 0xb,5
+  49 000a 00C0      		rjmp .L5
+ 239:main.c        **** 	UDR = c;
+  50               		.loc 1 239 2 view .LVU9
+  51               		.loc 1 239 6 is_stmt 0 view .LVU10
+  52 000c 8CB9      		out 0xc,r24
+  53               	/* epilogue start */
+ 240:main.c        **** }
+  54               		.loc 1 240 1 view .LVU11
+  55 000e 0895      		ret
+  56               		.cfi_endproc
+  57               	.LFE9:
+  59               	.global	read_ana_comp
+  61               	read_ana_comp:
+  62               	.LFB5:
+ 116:main.c        **** 	return ((ACSR >> ACO) & 1);
+  63               		.loc 1 116 1 is_stmt 1 view -0
+  64               		.cfi_startproc
+  65               	/* prologue: function */
+  66               	/* frame size = 0 */
+  67               	/* stack size = 0 */
+  68               	.L__stack_usage = 0
+ 117:main.c        **** }
+  69               		.loc 1 117 2 view .LVU13
+ 117:main.c        **** }
+  70               		.loc 1 117 11 is_stmt 0 view .LVU14
+  71 0010 88B1      		in r24,0x8
+ 118:main.c        **** 
+  72               		.loc 1 118 1 view .LVU15
+  73 0012 85FB      		bst r24,5
+  74 0014 8827      		clr r24
+  75 0016 80F9      		bld r24,0
+  76               	/* epilogue start */
+  77 0018 0895      		ret
+  78               		.cfi_endproc
+  79               	.LFE5:
+  81               	.global	setpwm
+  83               	setpwm:
+  84               	.LVL1:
+  85               	.LFB6:
+ 121:main.c        **** 	if(ch >= 4) return;
+  86               		.loc 1 121 1 is_stmt 1 view -0
+  87               		.cfi_startproc
+  88               	/* prologue: function */
+  89               	/* frame size = 0 */
+  90               	/* stack size = 0 */
+  91               	.L__stack_usage = 0
+ 122:main.c        **** 
+  92               		.loc 1 122 2 view .LVU17
+ 122:main.c        **** 
+  93               		.loc 1 122 4 is_stmt 0 view .LVU18
+  94 001a 8430      		cpi r24,lo8(4)
+  95 001c 00F4      		brsh .L9
+  96               	.LVL2:
+  97               	.LBB12:
+  98               	.LBI12:
+ 120:main.c        **** {
+  99               		.loc 1 120 6 is_stmt 1 view .LVU19
+ 100               	.LBB13:
+ 124:main.c        **** 	{
+ 101               		.loc 1 124 2 view .LVU20
+ 124:main.c        **** 	{
+ 102               		.loc 1 124 4 is_stmt 0 view .LVU21
+ 103 001e 6623      		tst r22
+ 104 0020 01F0      		breq .L11
+ 127:main.c        **** 		{
+ 105               		.loc 1 127 3 is_stmt 1 view .LVU22
+ 106 0022 8230      		cpi r24,lo8(2)
+ 107 0024 01F0      		breq .L12
+ 108 0026 8330      		cpi r24,lo8(3)
+ 109 0028 01F0      		breq .L13
+ 110 002a 8130      		cpi r24,lo8(1)
+ 111 002c 01F0      		breq .L14
+ 130:main.c        **** 				OCR0A = val;
+ 112               		.loc 1 130 5 view .LVU23
+ 130:main.c        **** 				OCR0A = val;
+ 113               		.loc 1 130 12 is_stmt 0 view .LVU24
+ 114 002e 80B7      		in r24,0x30
+ 115               	.LVL3:
+ 130:main.c        **** 				OCR0A = val;
+ 116               		.loc 1 130 12 view .LVU25
+ 117 0030 8068      		ori r24,lo8(-128)
+ 118 0032 80BF      		out 0x30,r24
+ 131:main.c        **** 				break;
+ 119               		.loc 1 131 5 is_stmt 1 view .LVU26
+ 131:main.c        **** 				break;
+ 120               		.loc 1 131 11 is_stmt 0 view .LVU27
+ 121 0034 66BF      		out 0x36,r22
+ 132:main.c        **** 
+ 122               		.loc 1 132 5 is_stmt 1 view .LVU28
+ 123 0036 0895      		ret
+ 124               	.LVL4:
+ 125               	.L14:
+ 135:main.c        **** 				OCR0B = val;
+ 126               		.loc 1 135 5 view .LVU29
+ 135:main.c        **** 				OCR0B = val;
+ 127               		.loc 1 135 12 is_stmt 0 view .LVU30
+ 128 0038 80B7      		in r24,0x30
+ 129               	.LVL5:
+ 135:main.c        **** 				OCR0B = val;
+ 130               		.loc 1 135 12 view .LVU31
+ 131 003a 8062      		ori r24,lo8(32)
+ 132 003c 80BF      		out 0x30,r24
+ 136:main.c        **** 				break;
+ 133               		.loc 1 136 5 is_stmt 1 view .LVU32
+ 136:main.c        **** 				break;
+ 134               		.loc 1 136 11 is_stmt 0 view .LVU33
+ 135 003e 6CBF      		out 0x3c,r22
+ 137:main.c        **** 
+ 136               		.loc 1 137 5 is_stmt 1 view .LVU34
+ 137 0040 0895      		ret
+ 138               	.LVL6:
+ 139               	.L12:
+ 140:main.c        **** 				OCR1A = val;
+ 140               		.loc 1 140 5 view .LVU35
+ 140:main.c        **** 				OCR1A = val;
+ 141               		.loc 1 140 12 is_stmt 0 view .LVU36
+ 142 0042 8FB5      		in r24,0x2f
+ 143               	.LVL7:
+ 140:main.c        **** 				OCR1A = val;
+ 144               		.loc 1 140 12 view .LVU37
+ 145 0044 8068      		ori r24,lo8(-128)
+ 146 0046 8FBD      		out 0x2f,r24
+ 141:main.c        **** 				break;
+ 147               		.loc 1 141 5 is_stmt 1 view .LVU38
+ 141:main.c        **** 				break;
+ 148               		.loc 1 141 11 is_stmt 0 view .LVU39
+ 149 0048 70E0      		ldi r23,0
+ 150 004a 7BBD      		out 0x2a+1,r23
+ 151 004c 6ABD      		out 0x2a,r22
+ 142:main.c        **** 
+ 152               		.loc 1 142 5 is_stmt 1 view .LVU40
+ 153 004e 0895      		ret
+ 154               	.LVL8:
+ 155               	.L13:
+ 145:main.c        **** 				OCR1B = val;
+ 156               		.loc 1 145 5 view .LVU41
+ 145:main.c        **** 				OCR1B = val;
+ 157               		.loc 1 145 12 is_stmt 0 view .LVU42
+ 158 0050 8FB5      		in r24,0x2f
+ 159               	.LVL9:
+ 145:main.c        **** 				OCR1B = val;
+ 160               		.loc 1 145 12 view .LVU43
+ 161 0052 8062      		ori r24,lo8(32)
+ 162 0054 8FBD      		out 0x2f,r24
+ 146:main.c        **** 				break;
+ 163               		.loc 1 146 5 is_stmt 1 view .LVU44
+ 146:main.c        **** 				break;
+ 164               		.loc 1 146 11 is_stmt 0 view .LVU45
+ 165 0056 70E0      		ldi r23,0
+ 166 0058 79BD      		out 0x28+1,r23
+ 167 005a 68BD      		out 0x28,r22
+ 147:main.c        **** 		}
+ 168               		.loc 1 147 5 is_stmt 1 view .LVU46
+ 169 005c 0895      		ret
+ 170               	.LVL10:
+ 171               	.L11:
+ 153:main.c        **** 		{
+ 172               		.loc 1 153 3 view .LVU47
+ 173 005e 8230      		cpi r24,lo8(2)
+ 174 0060 01F0      		breq .L15
+ 175 0062 8330      		cpi r24,lo8(3)
+ 176 0064 01F0      		breq .L16
+ 177 0066 8130      		cpi r24,lo8(1)
+ 178 0068 01F0      		breq .L17
+ 156:main.c        **** 				break;
+ 179               		.loc 1 156 5 view .LVU48
+ 156:main.c        **** 				break;
+ 180               		.loc 1 156 12 is_stmt 0 view .LVU49
+ 181 006a 80B7      		in r24,0x30
+ 182               	.LVL11:
+ 156:main.c        **** 				break;
+ 183               		.loc 1 156 12 view .LVU50
+ 184 006c 8F77      		andi r24,lo8(127)
+ 185               	.L18:
+ 160:main.c        **** 				break;
+ 186               		.loc 1 160 12 view .LVU51
+ 187 006e 80BF      		out 0x30,r24
+ 161:main.c        **** 
+ 188               		.loc 1 161 5 is_stmt 1 view .LVU52
+ 189 0070 0895      		ret
+ 190               	.LVL12:
+ 191               	.L17:
+ 160:main.c        **** 				break;
+ 192               		.loc 1 160 5 view .LVU53
+ 160:main.c        **** 				break;
+ 193               		.loc 1 160 12 is_stmt 0 view .LVU54
+ 194 0072 80B7      		in r24,0x30
+ 195               	.LVL13:
+ 160:main.c        **** 				break;
+ 196               		.loc 1 160 12 view .LVU55
+ 197 0074 8F7D      		andi r24,lo8(-33)
+ 198 0076 00C0      		rjmp .L18
+ 199               	.LVL14:
+ 200               	.L15:
+ 164:main.c        **** 				break;
+ 201               		.loc 1 164 5 is_stmt 1 view .LVU56
+ 164:main.c        **** 				break;
+ 202               		.loc 1 164 12 is_stmt 0 view .LVU57
+ 203 0078 8FB5      		in r24,0x2f
+ 204               	.LVL15:
+ 164:main.c        **** 				break;
+ 205               		.loc 1 164 12 view .LVU58
+ 206 007a 8F77      		andi r24,lo8(127)
+ 207               	.L19:
+ 168:main.c        **** 				break;
+ 208               		.loc 1 168 12 view .LVU59
+ 209 007c 8FBD      		out 0x2f,r24
+ 169:main.c        **** 		}
+ 210               		.loc 1 169 5 is_stmt 1 view .LVU60
+ 211               	.LVL16:
+ 212               	.L9:
+ 213               	/* epilogue start */
+ 169:main.c        **** 		}
+ 214               		.loc 1 169 5 is_stmt 0 view .LVU61
+ 215               	.LBE13:
+ 216               	.LBE12:
+ 172:main.c        **** 
+ 217               		.loc 1 172 1 view .LVU62
+ 218 007e 0895      		ret
+ 219               	.LVL17:
+ 220               	.L16:
+ 221               	.LBB15:
+ 222               	.LBB14:
+ 168:main.c        **** 				break;
+ 223               		.loc 1 168 5 is_stmt 1 view .LVU63
+ 168:main.c        **** 				break;
+ 224               		.loc 1 168 12 is_stmt 0 view .LVU64
+ 225 0080 8FB5      		in r24,0x2f
+ 226               	.LVL18:
+ 168:main.c        **** 				break;
+ 227               		.loc 1 168 12 view .LVU65
+ 228 0082 8F7D      		andi r24,lo8(-33)
+ 229 0084 00C0      		rjmp .L19
+ 230               	.LBE14:
+ 231               	.LBE15:
+ 232               		.cfi_endproc
+ 233               	.LFE6:
+ 235               	.global	rwpin
+ 237               	rwpin:
+ 238               	.LVL19:
+ 239               	.LFB7:
+ 176:main.c        **** 	unsigned char map_pin;
+ 240               		.loc 1 176 1 is_stmt 1 view -0
+ 241               		.cfi_startproc
+ 176:main.c        **** 	unsigned char map_pin;
+ 242               		.loc 1 176 1 is_stmt 0 view .LVU67
+ 243 0086 CF93      		push r28
+ 244               	.LCFI0:
+ 245               		.cfi_def_cfa_offset 3
+ 246               		.cfi_offset 28, -2
+ 247 0088 DF93      		push r29
+ 248               	.LCFI1:
+ 249               		.cfi_def_cfa_offset 4
+ 250               		.cfi_offset 29, -3
+ 251               	/* prologue: function */
+ 252               	/* frame size = 0 */
+ 253               	/* stack size = 2 */
+ 254               	.L__stack_usage = 2
+ 255 008a 282F      		mov r18,r24
+ 256 008c 862F      		mov r24,r22
+ 257               	.LVL20:
+ 177:main.c        **** 	volatile unsigned char *reg_ddr;
+ 258               		.loc 1 177 2 is_stmt 1 view .LVU68
+ 178:main.c        **** 	volatile unsigned char *reg_pin;
+ 259               		.loc 1 178 2 view .LVU69
+ 179:main.c        **** 	volatile unsigned char *reg_port;
+ 260               		.loc 1 179 2 view .LVU70
+ 180:main.c        **** 
+ 261               		.loc 1 180 2 view .LVU71
+ 182:main.c        **** 
+ 262               		.loc 1 182 2 view .LVU72
+ 182:main.c        **** 
+ 263               		.loc 1 182 4 is_stmt 0 view .LVU73
+ 264 008e 2D30      		cpi r18,lo8(13)
+ 265 0090 00F4      		brsh .L30
+ 266               	.LVL21:
+ 267               	.LBB18:
+ 268               	.LBI18:
+ 175:main.c        **** {
+ 269               		.loc 1 175 15 is_stmt 1 view .LVU74
+ 270               	.LBB19:
+ 184:main.c        **** 	{
+ 271               		.loc 1 184 2 view .LVU75
+ 188:main.c        **** 		map_pin = p;
+ 272               		.loc 1 188 12 is_stmt 0 view .LVU76
+ 273 0092 E8E3      		ldi r30,lo8(56)
+ 274 0094 F0E0      		ldi r31,0
+ 187:main.c        **** 		reg_port = &PORTB;
+ 275               		.loc 1 187 11 view .LVU77
+ 276 0096 C6E3      		ldi r28,lo8(54)
+ 277 0098 D0E0      		ldi r29,0
+ 186:main.c        **** 		reg_pin = &PINB;
+ 278               		.loc 1 186 11 view .LVU78
+ 279 009a A7E3      		ldi r26,lo8(55)
+ 280 009c B0E0      		ldi r27,0
+ 184:main.c        **** 	{
+ 281               		.loc 1 184 4 view .LVU79
+ 282 009e 2830      		cpi r18,lo8(8)
+ 283 00a0 00F0      		brlo .L22
+ 191:main.c        **** 	{
+ 284               		.loc 1 191 7 is_stmt 1 view .LVU80
+ 193:main.c        **** 		reg_pin = &PIND;
+ 285               		.loc 1 193 3 view .LVU81
+ 286               	.LVL22:
+ 194:main.c        **** 		reg_port = &PORTD;
+ 287               		.loc 1 194 3 view .LVU82
+ 195:main.c        **** 		map_pin = p-6;
+ 288               		.loc 1 195 3 view .LVU83
+ 196:main.c        **** 	}
+ 289               		.loc 1 196 3 view .LVU84
+ 196:main.c        **** 	}
+ 290               		.loc 1 196 11 is_stmt 0 view .LVU85
+ 291 00a2 2650      		subi r18,lo8(-(-6))
+ 292               	.LVL23:
+ 195:main.c        **** 		map_pin = p-6;
+ 293               		.loc 1 195 12 view .LVU86
+ 294 00a4 E2E3      		ldi r30,lo8(50)
+ 295 00a6 F0E0      		ldi r31,0
+ 194:main.c        **** 		reg_port = &PORTD;
+ 296               		.loc 1 194 11 view .LVU87
+ 297 00a8 C0E3      		ldi r28,lo8(48)
+ 298 00aa D0E0      		ldi r29,0
+ 193:main.c        **** 		reg_pin = &PIND;
+ 299               		.loc 1 193 11 view .LVU88
+ 300 00ac A1E3      		ldi r26,lo8(49)
+ 301 00ae B0E0      		ldi r27,0
+ 302               	.LVL24:
+ 303               	.L22:
+ 199:main.c        **** 	{
+ 304               		.loc 1 199 2 is_stmt 1 view .LVU89
+ 305 00b0 8330      		cpi r24,lo8(3)
+ 306 00b2 01F0      		breq .L23
+ 307 00b4 00F4      		brsh .L24
+ 308 00b6 8130      		cpi r24,lo8(1)
+ 309 00b8 01F0      		breq .L25
+ 310 00ba 8230      		cpi r24,lo8(2)
+ 311 00bc 01F0      		breq .L26
+ 312 00be 8823      		tst r24
+ 313 00c0 01F0      		breq .L27
+ 314               	.LVL25:
+ 315               	.L30:
+ 199:main.c        **** 	{
+ 316               		.loc 1 199 2 is_stmt 0 view .LVU90
+ 317               	.LBE19:
+ 318               	.LBE18:
+ 182:main.c        **** 
+ 319               		.loc 1 182 21 view .LVU91
+ 320 00c2 80E0      		ldi r24,0
+ 321 00c4 00C0      		rjmp .L21
+ 322               	.LVL26:
+ 323               	.L24:
+ 324               	.LBB22:
+ 325               	.LBB20:
+ 199:main.c        **** 	{
+ 326               		.loc 1 199 2 view .LVU92
+ 327 00c6 8430      		cpi r24,lo8(4)
+ 328 00c8 01F0      		breq .L28
+ 329 00ca 8530      		cpi r24,lo8(5)
+ 330 00cc 01F4      		brne .L30
+ 222:main.c        **** 			break;
+ 331               		.loc 1 222 4 is_stmt 1 view .LVU93
+ 222:main.c        **** 			break;
+ 332               		.loc 1 222 13 is_stmt 0 view .LVU94
+ 333 00ce 8881      		ld r24,Y
+ 334 00d0 90E0      		ldi r25,0
+ 222:main.c        **** 			break;
+ 335               		.loc 1 222 22 view .LVU95
+ 336 00d2 00C0      		rjmp 2f
+ 337               		1:
+ 338 00d4 9595      		asr r25
+ 339 00d6 8795      		ror r24
+ 340               		2:
+ 341 00d8 2A95      		dec r18
+ 342 00da 02F4      		brpl 1b
+ 222:main.c        **** 			break;
+ 343               		.loc 1 222 34 view .LVU96
+ 344 00dc 8170      		andi r24,lo8(1)
+ 345 00de 00C0      		rjmp .L21
+ 346               	.L27:
+ 202:main.c        **** 			break;
+ 347               		.loc 1 202 4 is_stmt 1 view .LVU97
+ 202:main.c        **** 			break;
+ 348               		.loc 1 202 13 is_stmt 0 view .LVU98
+ 349 00e0 9C91      		ld r25,X
+ 202:main.c        **** 			break;
+ 350               		.loc 1 202 19 view .LVU99
+ 351 00e2 41E0      		ldi r20,lo8(1)
+ 352 00e4 50E0      		ldi r21,0
+ 353 00e6 00C0      		rjmp 2f
+ 354               		1:
+ 355 00e8 440F      		lsl r20
+ 356               		2:
+ 357 00ea 2A95      		dec r18
+ 358 00ec 02F4      		brpl 1b
+ 202:main.c        **** 			break;
+ 359               		.loc 1 202 13 view .LVU100
+ 360 00ee 942B      		or r25,r20
+ 361 00f0 9C93      		st X,r25
+ 203:main.c        **** 
+ 362               		.loc 1 203 4 is_stmt 1 view .LVU101
+ 363               	.LVL27:
+ 364               	.L21:
+ 365               	/* epilogue start */
+ 203:main.c        **** 
+ 366               		.loc 1 203 4 is_stmt 0 view .LVU102
+ 367               	.LBE20:
+ 368               	.LBE22:
+ 227:main.c        **** 
+ 369               		.loc 1 227 1 view .LVU103
+ 370 00f2 DF91      		pop r29
+ 371 00f4 CF91      		pop r28
+ 372 00f6 0895      		ret
+ 373               	.LVL28:
+ 374               	.L25:
+ 375               	.LBB23:
+ 376               	.LBB21:
+ 206:main.c        **** 			break;
+ 377               		.loc 1 206 4 is_stmt 1 view .LVU104
+ 206:main.c        **** 			break;
+ 378               		.loc 1 206 13 is_stmt 0 view .LVU105
+ 379 00f8 3C91      		ld r19,X
+ 206:main.c        **** 			break;
+ 380               		.loc 1 206 20 view .LVU106
+ 381 00fa 81E0      		ldi r24,lo8(1)
+ 382 00fc 90E0      		ldi r25,0
+ 383 00fe 00C0      		rjmp 2f
+ 384               		1:
+ 385 0100 880F      		lsl r24
+ 386               		2:
+ 387 0102 2A95      		dec r18
+ 388 0104 02F4      		brpl 1b
+ 206:main.c        **** 			break;
+ 389               		.loc 1 206 13 view .LVU107
+ 390 0106 8095      		com r24
+ 391 0108 8323      		and r24,r19
+ 392 010a 8C93      		st X,r24
+ 207:main.c        **** 
+ 393               		.loc 1 207 4 is_stmt 1 view .LVU108
+ 394 010c 00C0      		rjmp .L30
+ 395               	.L26:
+ 210:main.c        **** 			break;
+ 396               		.loc 1 210 4 view .LVU109
+ 210:main.c        **** 			break;
+ 397               		.loc 1 210 14 is_stmt 0 view .LVU110
+ 398 010e 8081      		ld r24,Z
+ 210:main.c        **** 			break;
+ 399               		.loc 1 210 20 view .LVU111
+ 400 0110 41E0      		ldi r20,lo8(1)
+ 401 0112 50E0      		ldi r21,0
+ 402 0114 00C0      		rjmp 2f
+ 403               		1:
+ 404 0116 440F      		lsl r20
+ 405               		2:
+ 406 0118 2A95      		dec r18
+ 407 011a 02F4      		brpl 1b
+ 210:main.c        **** 			break;
+ 408               		.loc 1 210 14 view .LVU112
+ 409 011c 8427      		eor r24,r20
+ 410               	.L32:
+ 218:main.c        **** 			break;
+ 411               		.loc 1 218 14 view .LVU113
+ 412 011e 8083      		st Z,r24
+ 219:main.c        **** 
+ 413               		.loc 1 219 4 is_stmt 1 view .LVU114
+ 414 0120 00C0      		rjmp .L30
+ 415               	.L23:
+ 214:main.c        **** 			break;
+ 416               		.loc 1 214 4 view .LVU115
+ 214:main.c        **** 			break;
+ 417               		.loc 1 214 14 is_stmt 0 view .LVU116
+ 418 0122 8081      		ld r24,Z
+ 214:main.c        **** 			break;
+ 419               		.loc 1 214 20 view .LVU117
+ 420 0124 41E0      		ldi r20,lo8(1)
+ 421 0126 50E0      		ldi r21,0
+ 422 0128 00C0      		rjmp 2f
+ 423               		1:
+ 424 012a 440F      		lsl r20
+ 425               		2:
+ 426 012c 2A95      		dec r18
+ 427 012e 02F4      		brpl 1b
+ 214:main.c        **** 			break;
+ 428               		.loc 1 214 14 view .LVU118
+ 429 0130 842B      		or r24,r20
+ 430 0132 00C0      		rjmp .L32
+ 431               	.L28:
+ 218:main.c        **** 			break;
+ 432               		.loc 1 218 4 is_stmt 1 view .LVU119
+ 218:main.c        **** 			break;
+ 433               		.loc 1 218 14 is_stmt 0 view .LVU120
+ 434 0134 3081      		ld r19,Z
+ 218:main.c        **** 			break;
+ 435               		.loc 1 218 21 view .LVU121
+ 436 0136 81E0      		ldi r24,lo8(1)
+ 437 0138 90E0      		ldi r25,0
+ 438 013a 00C0      		rjmp 2f
+ 439               		1:
+ 440 013c 880F      		lsl r24
+ 441               		2:
+ 442 013e 2A95      		dec r18
+ 443 0140 02F4      		brpl 1b
+ 218:main.c        **** 			break;
+ 444               		.loc 1 218 14 view .LVU122
+ 445 0142 8095      		com r24
+ 446 0144 8323      		and r24,r19
+ 447 0146 00C0      		rjmp .L32
+ 448               	.LBE21:
+ 449               	.LBE23:
+ 450               		.cfi_endproc
+ 451               	.LFE7:
+ 453               	.global	outstr
+ 455               	outstr:
+ 456               	.LVL29:
+ 457               	.LFB10:
+ 241:main.c        **** 
+ 242:main.c        **** void outstr(char *str, void (*fn_out)(unsigned char))
+ 243:main.c        **** {
+ 458               		.loc 1 243 1 is_stmt 1 view -0
+ 459               		.cfi_startproc
+ 460               		.loc 1 243 1 is_stmt 0 view .LVU124
+ 461 0148 0F93      		push r16
+ 462               	.LCFI2:
+ 463               		.cfi_def_cfa_offset 3
+ 464               		.cfi_offset 16, -2
+ 465 014a 1F93      		push r17
+ 466               	.LCFI3:
+ 467               		.cfi_def_cfa_offset 4
+ 468               		.cfi_offset 17, -3
+ 469 014c CF93      		push r28
+ 470               	.LCFI4:
+ 471               		.cfi_def_cfa_offset 5
+ 472               		.cfi_offset 28, -4
+ 473 014e DF93      		push r29
+ 474               	.LCFI5:
+ 475               		.cfi_def_cfa_offset 6
+ 476               		.cfi_offset 29, -5
+ 477               	/* prologue: function */
+ 478               	/* frame size = 0 */
+ 479               	/* stack size = 4 */
+ 480               	.L__stack_usage = 4
+ 481 0150 8B01      		movw r16,r22
+ 244:main.c        **** 	while(*str)
+ 482               		.loc 1 244 2 is_stmt 1 view .LVU125
+ 483 0152 EC01      		movw r28,r24
+ 484               	.LVL30:
+ 485               	.L34:
+ 486               		.loc 1 244 7 view .LVU126
+ 487               		.loc 1 244 8 is_stmt 0 view .LVU127
+ 488 0154 8991      		ld r24,Y+
+ 489               	.LVL31:
+ 490               		.loc 1 244 7 view .LVU128
+ 491 0156 8111      		cpse r24,__zero_reg__
+ 492 0158 00C0      		rjmp .L35
+ 493               	/* epilogue start */
+ 245:main.c        **** 	{
+ 246:main.c        **** 		(*fn_out)(*str++);
+ 247:main.c        **** 	}
+ 248:main.c        **** }
+ 494               		.loc 1 248 1 view .LVU129
+ 495 015a DF91      		pop r29
+ 496 015c CF91      		pop r28
+ 497               	.LVL32:
+ 498               		.loc 1 248 1 view .LVU130
+ 499 015e 1F91      		pop r17
+ 500 0160 0F91      		pop r16
+ 501               	.LVL33:
+ 502               		.loc 1 248 1 view .LVU131
+ 503 0162 0895      		ret
+ 504               	.LVL34:
+ 505               	.L35:
+ 246:main.c        **** 	}
+ 506               		.loc 1 246 3 is_stmt 1 view .LVU132
+ 246:main.c        **** 	}
+ 507               		.loc 1 246 4 is_stmt 0 view .LVU133
+ 508 0164 F801      		movw r30,r16
+ 509 0166 0995      		icall
+ 510               	.LVL35:
+ 511 0168 00C0      		rjmp .L34
+ 512               		.cfi_endproc
+ 513               	.LFE10:
+ 515               	.global	instr
+ 517               	instr:
+ 518               	.LVL36:
+ 519               	.LFB11:
+ 249:main.c        **** 
+ 250:main.c        **** char *instr(char *buf, unsigned char buflen, char term, unsigned char (*fn_in)(void))
+ 251:main.c        **** {
+ 520               		.loc 1 251 1 is_stmt 1 view -0
+ 521               		.cfi_startproc
+ 522               		.loc 1 251 1 is_stmt 0 view .LVU135
+ 523 016a AF92      		push r10
+ 524               	.LCFI6:
+ 525               		.cfi_def_cfa_offset 3
+ 526               		.cfi_offset 10, -2
+ 527 016c BF92      		push r11
+ 528               	.LCFI7:
+ 529               		.cfi_def_cfa_offset 4
+ 530               		.cfi_offset 11, -3
+ 531 016e CF92      		push r12
+ 532               	.LCFI8:
+ 533               		.cfi_def_cfa_offset 5
+ 534               		.cfi_offset 12, -4
+ 535 0170 DF92      		push r13
+ 536               	.LCFI9:
+ 537               		.cfi_def_cfa_offset 6
+ 538               		.cfi_offset 13, -5
+ 539 0172 EF92      		push r14
+ 540               	.LCFI10:
+ 541               		.cfi_def_cfa_offset 7
+ 542               		.cfi_offset 14, -6
+ 543 0174 FF92      		push r15
+ 544               	.LCFI11:
+ 545               		.cfi_def_cfa_offset 8
+ 546               		.cfi_offset 15, -7
+ 547 0176 0F93      		push r16
+ 548               	.LCFI12:
+ 549               		.cfi_def_cfa_offset 9
+ 550               		.cfi_offset 16, -8
+ 551 0178 1F93      		push r17
+ 552               	.LCFI13:
+ 553               		.cfi_def_cfa_offset 10
+ 554               		.cfi_offset 17, -9
+ 555 017a CF93      		push r28
+ 556               	.LCFI14:
+ 557               		.cfi_def_cfa_offset 11
+ 558               		.cfi_offset 28, -10
+ 559 017c DF93      		push r29
+ 560               	.LCFI15:
+ 561               		.cfi_def_cfa_offset 12
+ 562               		.cfi_offset 29, -11
+ 563               	/* prologue: function */
+ 564               	/* frame size = 0 */
+ 565               	/* stack size = 10 */
+ 566               	.L__stack_usage = 10
+ 567 017e 8C01      		movw r16,r24
+ 568 0180 A42E      		mov r10,r20
+ 569 0182 6901      		movw r12,r18
+ 252:main.c        **** 	unsigned char i = 0;
+ 570               		.loc 1 252 2 is_stmt 1 view .LVU136
+ 571               	.LVL37:
+ 253:main.c        **** 	unsigned char c;
+ 572               		.loc 1 253 2 view .LVU137
+ 254:main.c        **** 
+ 255:main.c        **** 	while((c = (*fn_in)()) != term && i < buflen-1)
+ 573               		.loc 1 255 2 view .LVU138
+ 252:main.c        **** 	unsigned char c;
+ 574               		.loc 1 252 16 is_stmt 0 view .LVU139
+ 575 0184 B12C      		mov r11,__zero_reg__
+ 576               		.loc 1 255 46 view .LVU140
+ 577 0186 862F      		mov r24,r22
+ 578               	.LVL38:
+ 579               		.loc 1 255 46 view .LVU141
+ 580 0188 8150      		subi r24,1
+ 581 018a 990B      		sbc r25,r25
+ 582 018c 7C01      		movw r14,r24
+ 583               	.LVL39:
+ 584               	.L37:
+ 585               		.loc 1 255 46 view .LVU142
+ 586 018e CB2D      		mov r28,r11
+ 587 0190 D0E0      		ldi r29,0
+ 588               	.L38:
+ 589               	.LVL40:
+ 590               		.loc 1 255 7 is_stmt 1 view .LVU143
+ 591               		.loc 1 255 14 is_stmt 0 view .LVU144
+ 592 0192 F601      		movw r30,r12
+ 593 0194 0995      		icall
+ 594               	.LVL41:
+ 595               		.loc 1 255 7 view .LVU145
+ 596 0196 8A15      		cp r24,r10
+ 597 0198 01F0      		breq .L41
+ 598               		.loc 1 255 33 discriminator 1 view .LVU146
+ 599 019a CE15      		cp r28,r14
+ 600 019c DF05      		cpc r29,r15
+ 601 019e 04F0      		brlt .L40
+ 602               	.L41:
+ 256:main.c        **** 	{
+ 257:main.c        **** 		if(c >= 32)
+ 258:main.c        **** 		{
+ 259:main.c        **** 			buf[i++] = (char)c;
+ 260:main.c        **** 		}
+ 261:main.c        **** 	}
+ 262:main.c        **** 
+ 263:main.c        **** 	buf[i] = '\0';
+ 603               		.loc 1 263 2 is_stmt 1 view .LVU147
+ 604               		.loc 1 263 9 is_stmt 0 view .LVU148
+ 605 01a0 C00F      		add r28,r16
+ 606 01a2 D11F      		adc r29,r17
+ 607 01a4 1882      		st Y,__zero_reg__
+ 264:main.c        **** 	return buf;
+ 608               		.loc 1 264 2 is_stmt 1 view .LVU149
+ 265:main.c        **** }
+ 609               		.loc 1 265 1 is_stmt 0 view .LVU150
+ 610 01a6 C801      		movw r24,r16
+ 611               	.LVL42:
+ 612               	/* epilogue start */
+ 613               		.loc 1 265 1 view .LVU151
+ 614 01a8 DF91      		pop r29
+ 615 01aa CF91      		pop r28
+ 616 01ac 1F91      		pop r17
+ 617 01ae 0F91      		pop r16
+ 618               	.LVL43:
+ 619               		.loc 1 265 1 view .LVU152
+ 620 01b0 FF90      		pop r15
+ 621 01b2 EF90      		pop r14
+ 622 01b4 DF90      		pop r13
+ 623 01b6 CF90      		pop r12
+ 624               	.LVL44:
+ 625               		.loc 1 265 1 view .LVU153
+ 626 01b8 BF90      		pop r11
+ 627               	.LVL45:
+ 628               		.loc 1 265 1 view .LVU154
+ 629 01ba AF90      		pop r10
+ 630               	.LVL46:
+ 631               		.loc 1 265 1 view .LVU155
+ 632 01bc 0895      		ret
+ 633               	.LVL47:
+ 634               	.L40:
+ 257:main.c        **** 		{
+ 635               		.loc 1 257 3 is_stmt 1 view .LVU156
+ 257:main.c        **** 		{
+ 636               		.loc 1 257 5 is_stmt 0 view .LVU157
+ 637 01be 8032      		cpi r24,lo8(32)
+ 638 01c0 00F0      		brlo .L38
+ 259:main.c        **** 		}
+ 639               		.loc 1 259 4 is_stmt 1 view .LVU158
+ 640               	.LVL48:
+ 259:main.c        **** 		}
+ 641               		.loc 1 259 13 is_stmt 0 view .LVU159
+ 642 01c2 C00F      		add r28,r16
+ 643 01c4 D11F      		adc r29,r17
+ 644 01c6 8883      		st Y,r24
+ 259:main.c        **** 		}
+ 645               		.loc 1 259 9 view .LVU160
+ 646 01c8 B394      		inc r11
+ 647               	.LVL49:
+ 259:main.c        **** 		}
+ 648               		.loc 1 259 9 view .LVU161
+ 649 01ca 00C0      		rjmp .L37
+ 650               		.cfi_endproc
+ 651               	.LFE11:
+ 653               		.section	.text.startup,"ax",@progbits
+ 654               	.global	main
+ 656               	main:
+ 657               	.LFB4:
+  29:main.c        **** 	unsigned char cpc = 0;
+ 658               		.loc 1 29 1 is_stmt 1 view -0
+ 659               		.cfi_startproc
+ 660 0000 CDB7      		in r28,__SP_L__
+ 661 0002 DD27      		clr r29
+ 662               	.LCFI16:
+ 663               		.cfi_def_cfa_register 28
+ 664 0004 C254      		subi r28,lo8(-(-66))
+ 665               	.LCFI17:
+ 666               		.cfi_def_cfa_offset 68
+ 667 0006 CDBF      		out __SP_L__,r28
+ 668               	/* prologue: function */
+ 669               	/* frame size = 66 */
+ 670               	/* stack size = 66 */
+ 671               	.L__stack_usage = 66
+  30:main.c        **** 	unsigned char iv = 0;
+ 672               		.loc 1 30 2 view .LVU163
+ 673               	.LVL50:
+  31:main.c        **** 	char inbuf[BUFLEN];
+ 674               		.loc 1 31 2 view .LVU164
+  32:main.c        **** 	char *cv;
+ 675               		.loc 1 32 2 view .LVU165
+  33:main.c        **** 
+ 676               		.loc 1 33 2 view .LVU166
+  36:main.c        **** 	UBRRL = (unsigned char)BAUD;
+ 677               		.loc 1 36 2 view .LVU167
+  36:main.c        **** 	UBRRL = (unsigned char)BAUD;
+ 678               		.loc 1 36 8 is_stmt 0 view .LVU168
+ 679 0008 12B8      		out 0x2,__zero_reg__
+  37:main.c        **** 
+ 680               		.loc 1 37 2 is_stmt 1 view .LVU169
+  37:main.c        **** 
+ 681               		.loc 1 37 8 is_stmt 0 view .LVU170
+ 682 000a 8FEB      		ldi r24,lo8(-65)
+ 683 000c 89B9      		out 0x9,r24
+  39:main.c        **** 	UCSRC = (1 << UCSZ1) | (1 << UCSZ0);
+ 684               		.loc 1 39 2 is_stmt 1 view .LVU171
+  39:main.c        **** 	UCSRC = (1 << UCSZ1) | (1 << UCSZ0);
+ 685               		.loc 1 39 8 is_stmt 0 view .LVU172
+ 686 000e 88E1      		ldi r24,lo8(24)
+ 687 0010 8AB9      		out 0xa,r24
+  40:main.c        **** 
+ 688               		.loc 1 40 2 is_stmt 1 view .LVU173
+  40:main.c        **** 
+ 689               		.loc 1 40 8 is_stmt 0 view .LVU174
+ 690 0012 86E0      		ldi r24,lo8(6)
+ 691 0014 83B9      		out 0x3,r24
+  43:main.c        **** 	TCCR0B = (1 << CS01);
+ 692               		.loc 1 43 2 is_stmt 1 view .LVU175
+  43:main.c        **** 	TCCR0B = (1 << CS01);
+ 693               		.loc 1 43 9 is_stmt 0 view .LVU176
+ 694 0016 83E0      		ldi r24,lo8(3)
+ 695 0018 80BF      		out 0x30,r24
+  44:main.c        **** 
+ 696               		.loc 1 44 2 is_stmt 1 view .LVU177
+  44:main.c        **** 
+ 697               		.loc 1 44 9 is_stmt 0 view .LVU178
+ 698 001a 82E0      		ldi r24,lo8(2)
+ 699 001c 83BF      		out 0x33,r24
+  46:main.c        **** 	OCR0B = 0;
+ 700               		.loc 1 46 2 is_stmt 1 view .LVU179
+  46:main.c        **** 	OCR0B = 0;
+ 701               		.loc 1 46 8 is_stmt 0 view .LVU180
+ 702 001e 16BE      		out 0x36,__zero_reg__
+  47:main.c        **** 
+ 703               		.loc 1 47 2 is_stmt 1 view .LVU181
+  47:main.c        **** 
+ 704               		.loc 1 47 8 is_stmt 0 view .LVU182
+ 705 0020 1CBE      		out 0x3c,__zero_reg__
+  49:main.c        **** 	TCCR1B = (1 << WGM12) | (1 << CS11);
+ 706               		.loc 1 49 2 is_stmt 1 view .LVU183
+  49:main.c        **** 	TCCR1B = (1 << WGM12) | (1 << CS11);
+ 707               		.loc 1 49 9 is_stmt 0 view .LVU184
+ 708 0022 81E0      		ldi r24,lo8(1)
+ 709 0024 8FBD      		out 0x2f,r24
+  50:main.c        **** 
+ 710               		.loc 1 50 2 is_stmt 1 view .LVU185
+  50:main.c        **** 
+ 711               		.loc 1 50 9 is_stmt 0 view .LVU186
+ 712 0026 8AE0      		ldi r24,lo8(10)
+ 713 0028 8EBD      		out 0x2e,r24
+  52:main.c        **** 	OCR1B = 0;
+ 714               		.loc 1 52 2 is_stmt 1 view .LVU187
+  52:main.c        **** 	OCR1B = 0;
+ 715               		.loc 1 52 8 is_stmt 0 view .LVU188
+ 716 002a 1BBC      		out 0x2a+1,__zero_reg__
+ 717 002c 1ABC      		out 0x2a,__zero_reg__
+  53:main.c        **** 
+ 718               		.loc 1 53 2 is_stmt 1 view .LVU189
+  53:main.c        **** 
+ 719               		.loc 1 53 8 is_stmt 0 view .LVU190
+ 720 002e 19BC      		out 0x28+1,__zero_reg__
+ 721 0030 18BC      		out 0x28,__zero_reg__
+  55:main.c        **** 
+ 722               		.loc 1 55 2 is_stmt 1 view .LVU191
+ 723               	/* #APP */
+ 724               	 ;  55 "main.c" 1
+ 725 0032 7894      		sei
+ 726               	 ;  0 "" 2
+  30:main.c        **** 	unsigned char iv = 0;
+ 727               		.loc 1 30 16 is_stmt 0 view .LVU192
+ 728               	/* #NOAPP */
+ 729 0034 D12C      		mov r13,__zero_reg__
+  59:main.c        **** 		cv = &(inbuf[1]);
+ 730               		.loc 1 59 3 view .LVU193
+ 731 0036 CE01      		movw r24,r28
+ 732 0038 0196      		adiw r24,1
+ 733 003a 7C01      		movw r14,r24
+  61:main.c        **** 
+ 734               		.loc 1 61 8 view .LVU194
+ 735 003c 8E01      		movw r16,r28
+ 736 003e 0E5F      		subi r16,-2
+ 737 0040 1F4F      		sbci r17,-1
+ 738               	.LVL51:
+ 739               	.L45:
+  57:main.c        **** 	{
+ 740               		.loc 1 57 2 is_stmt 1 view .LVU195
+  59:main.c        **** 		cv = &(inbuf[1]);
+ 741               		.loc 1 59 3 view .LVU196
+ 742 0042 20E0      		ldi r18,lo8(gs(uart_receive))
+ 743 0044 30E0      		ldi r19,hi8(gs(uart_receive))
+ 744 0046 4AE0      		ldi r20,lo8(10)
+ 745 0048 62E4      		ldi r22,lo8(66)
+ 746 004a C701      		movw r24,r14
+ 747 004c 00D0      		rcall instr
+ 748               	.LVL52:
+  60:main.c        **** 		iv = atoi(cv); /* convert string to integer */;
+ 749               		.loc 1 60 3 view .LVU197
+  61:main.c        **** 
+ 750               		.loc 1 61 3 view .LVU198
+  61:main.c        **** 
+ 751               		.loc 1 61 8 is_stmt 0 view .LVU199
+ 752 004e C801      		movw r24,r16
+ 753 0050 00D0      		rcall atoi
+ 754               	.LVL53:
+  61:main.c        **** 
+ 755               		.loc 1 61 49 is_stmt 1 view .LVU200
+  63:main.c        **** 		{
+ 756               		.loc 1 63 3 view .LVU201
+ 757 0052 E981      		ldd r30,Y+1
+ 758 0054 E156      		subi r30,lo8(-(-97))
+ 759 0056 BE2C      		mov r11,r14
+ 760 0058 CF2C      		mov r12,r15
+ 761 005a 912F      		mov r25,r17
+ 762 005c E431      		cpi r30,lo8(20)
+ 763 005e 00F4      		brsh .L45
+ 764 0060 F0E0      		ldi r31,0
+ 765 0062 E050      		subi r30,lo8(-(gs(.L48)))
+ 766 0064 F040      		sbci r31,hi8(-(gs(.L48)))
+ 767 0066 0994      		ijmp
+ 768               		.section	.jumptables.gcc.main,"ax",@progbits
+ 769               		.p2align	1
+ 770               	.L48:
+ 771 0000 00C0      		rjmp .L57
+ 772 0002 00C0      		rjmp .L45
+ 773 0004 00C0      		rjmp .L56
+ 774 0006 00C0      		rjmp .L45
+ 775 0008 00C0      		rjmp .L55
+ 776 000a 00C0      		rjmp .L45
+ 777 000c 00C0      		rjmp .L45
+ 778 000e 00C0      		rjmp .L54
+ 779 0010 00C0      		rjmp .L53
+ 780 0012 00C0      		rjmp .L45
+ 781 0014 00C0      		rjmp .L45
+ 782 0016 00C0      		rjmp .L52
+ 783 0018 00C0      		rjmp .L45
+ 784 001a 00C0      		rjmp .L45
+ 785 001c 00C0      		rjmp .L51
+ 786 001e 00C0      		rjmp .L50
+ 787 0020 00C0      		rjmp .L45
+ 788 0022 00C0      		rjmp .L49
+ 789 0024 00C0      		rjmp .L45
+ 790 0026 00C0      		rjmp .L47
+ 791               		.section	.text.startup
+ 792               	.L56:
+ 793 0068 D82E      		mov r13,r24
+ 794               	.LVL54:
+  63:main.c        **** 		{
+ 795               		.loc 1 63 3 is_stmt 0 view .LVU202
+ 796 006a 00C0      		rjmp .L45
+ 797               	.LVL55:
+ 798               	.L55:
+  66:main.c        **** 				uart_transmit('\n');
+ 799               		.loc 1 66 5 is_stmt 1 view .LVU203
+ 800 006c 60E0      		ldi r22,lo8(gs(uart_transmit))
+ 801 006e 70E0      		ldi r23,hi8(gs(uart_transmit))
+ 802 0070 802F      		mov r24,r16
+ 803               	.LVL56:
+ 804               	.L59:
+  98:main.c        **** 				uart_transmit('\n');
+ 805               		.loc 1 98 5 is_stmt 0 view .LVU204
+ 806 0072 00D0      		rcall outstr
+ 807               	.LVL57:
+  99:main.c        **** 				break;
+ 808               		.loc 1 99 5 is_stmt 1 view .LVU205
+ 809 0074 8AE0      		ldi r24,lo8(10)
+ 810 0076 00D0      		rcall uart_transmit
+ 811               	.LVL58:
+ 100:main.c        **** 
+ 812               		.loc 1 100 5 view .LVU206
+ 813 0078 00C0      		rjmp .L45
+ 814               	.LVL59:
+ 815               	.L53:
+  71:main.c        **** 				break;
+ 816               		.loc 1 71 5 view .LVU207
+ 817 007a 61E0      		ldi r22,lo8(1)
+ 818               	.L60:
+  87:main.c        **** 				break;
+ 819               		.loc 1 87 5 is_stmt 0 view .LVU208
+ 820 007c 00D0      		rcall rwpin
+ 821               	.LVL60:
+  88:main.c        **** 
+ 822               		.loc 1 88 5 is_stmt 1 view .LVU209
+ 823 007e 00C0      		rjmp .L45
+ 824               	.LVL61:
+ 825               	.L51:
+  75:main.c        **** 				break;
+ 826               		.loc 1 75 5 view .LVU210
+ 827 0080 60E0      		ldi r22,0
+ 828 0082 00C0      		rjmp .L60
+ 829               	.L47:
+  79:main.c        **** 				break;
+ 830               		.loc 1 79 5 view .LVU211
+ 831 0084 62E0      		ldi r22,lo8(2)
+ 832 0086 00C0      		rjmp .L60
+ 833               	.L54:
+  83:main.c        **** 				break;
+ 834               		.loc 1 83 5 view .LVU212
+ 835 0088 63E0      		ldi r22,lo8(3)
+ 836 008a 00C0      		rjmp .L60
+ 837               	.L52:
+  87:main.c        **** 				break;
+ 838               		.loc 1 87 5 view .LVU213
+ 839 008c 64E0      		ldi r22,lo8(4)
+ 840 008e 00C0      		rjmp .L60
+ 841               	.L49:
+  91:main.c        **** 				outstr(itoa(iv, inbuf, 10), uart_transmit);
+ 842               		.loc 1 91 5 view .LVU214
+  91:main.c        **** 				outstr(itoa(iv, inbuf, 10), uart_transmit);
+ 843               		.loc 1 91 10 is_stmt 0 view .LVU215
+ 844 0090 65E0      		ldi r22,lo8(5)
+ 845 0092 00D0      		rcall rwpin
+ 846               	.LVL62:
+ 847               	.L58:
+  98:main.c        **** 				uart_transmit('\n');
+ 848               		.loc 1 98 5 is_stmt 1 view .LVU216
+ 849               	.LBB24:
+ 850               	.LBI24:
+ 851               		.file 2 "/usr/avr/include/stdlib.h"
+   1:/usr/avr/include/stdlib.h **** /* Copyright (c) 2002, Marek Michalkiewicz
+   2:/usr/avr/include/stdlib.h ****    Copyright (c) 2004,2007 Joerg Wunsch
+   3:/usr/avr/include/stdlib.h **** 
+   4:/usr/avr/include/stdlib.h ****    Portions of documentation Copyright (c) 1990, 1991, 1993, 1994
+   5:/usr/avr/include/stdlib.h ****    The Regents of the University of California.
+   6:/usr/avr/include/stdlib.h **** 
+   7:/usr/avr/include/stdlib.h ****    All rights reserved.
+   8:/usr/avr/include/stdlib.h **** 
+   9:/usr/avr/include/stdlib.h ****    Redistribution and use in source and binary forms, with or without
+  10:/usr/avr/include/stdlib.h ****    modification, are permitted provided that the following conditions are met:
+  11:/usr/avr/include/stdlib.h **** 
+  12:/usr/avr/include/stdlib.h ****    * Redistributions of source code must retain the above copyright
+  13:/usr/avr/include/stdlib.h ****      notice, this list of conditions and the following disclaimer.
+  14:/usr/avr/include/stdlib.h **** 
+  15:/usr/avr/include/stdlib.h ****    * Redistributions in binary form must reproduce the above copyright
+  16:/usr/avr/include/stdlib.h ****      notice, this list of conditions and the following disclaimer in
+  17:/usr/avr/include/stdlib.h ****      the documentation and/or other materials provided with the
+  18:/usr/avr/include/stdlib.h ****      distribution.
+  19:/usr/avr/include/stdlib.h **** 
+  20:/usr/avr/include/stdlib.h ****    * Neither the name of the copyright holders nor the names of
+  21:/usr/avr/include/stdlib.h ****      contributors may be used to endorse or promote products derived
+  22:/usr/avr/include/stdlib.h ****      from this software without specific prior written permission.
+  23:/usr/avr/include/stdlib.h **** 
+  24:/usr/avr/include/stdlib.h ****   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+  25:/usr/avr/include/stdlib.h ****   AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+  26:/usr/avr/include/stdlib.h ****   IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+  27:/usr/avr/include/stdlib.h ****   ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+  28:/usr/avr/include/stdlib.h ****   LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+  29:/usr/avr/include/stdlib.h ****   CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+  30:/usr/avr/include/stdlib.h ****   SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+  31:/usr/avr/include/stdlib.h ****   INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+  32:/usr/avr/include/stdlib.h ****   CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+  33:/usr/avr/include/stdlib.h ****   ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+  34:/usr/avr/include/stdlib.h ****   POSSIBILITY OF SUCH DAMAGE.
+  35:/usr/avr/include/stdlib.h **** 
+  36:/usr/avr/include/stdlib.h ****   $Id: stdlib.h 2503 2016-02-07 22:59:47Z joerg_wunsch $
+  37:/usr/avr/include/stdlib.h **** */
+  38:/usr/avr/include/stdlib.h **** 
+  39:/usr/avr/include/stdlib.h **** #ifndef _STDLIB_H_
+  40:/usr/avr/include/stdlib.h **** #define	_STDLIB_H_ 1
+  41:/usr/avr/include/stdlib.h **** 
+  42:/usr/avr/include/stdlib.h **** #ifndef __ASSEMBLER__
+  43:/usr/avr/include/stdlib.h **** 
+  44:/usr/avr/include/stdlib.h **** #ifndef __DOXYGEN__
+  45:/usr/avr/include/stdlib.h **** #define __need_NULL
+  46:/usr/avr/include/stdlib.h **** #define __need_size_t
+  47:/usr/avr/include/stdlib.h **** #define __need_wchar_t
+  48:/usr/avr/include/stdlib.h **** #include <stddef.h>
+  49:/usr/avr/include/stdlib.h **** 
+  50:/usr/avr/include/stdlib.h **** #ifndef __ptr_t
+  51:/usr/avr/include/stdlib.h **** #define __ptr_t void *
+  52:/usr/avr/include/stdlib.h **** #endif
+  53:/usr/avr/include/stdlib.h **** #endif	/* !__DOXYGEN__ */
+  54:/usr/avr/include/stdlib.h **** 
+  55:/usr/avr/include/stdlib.h **** #ifdef __cplusplus
+  56:/usr/avr/include/stdlib.h **** extern "C" {
+  57:/usr/avr/include/stdlib.h **** #endif
+  58:/usr/avr/include/stdlib.h **** 
+  59:/usr/avr/include/stdlib.h **** /** \file */
+  60:/usr/avr/include/stdlib.h **** 
+  61:/usr/avr/include/stdlib.h **** /** \defgroup avr_stdlib <stdlib.h>: General utilities
+  62:/usr/avr/include/stdlib.h ****     \code #include <stdlib.h> \endcode
+  63:/usr/avr/include/stdlib.h **** 
+  64:/usr/avr/include/stdlib.h ****     This file declares some basic C macros and functions as
+  65:/usr/avr/include/stdlib.h ****     defined by the ISO standard, plus some AVR-specific extensions.
+  66:/usr/avr/include/stdlib.h **** */
+  67:/usr/avr/include/stdlib.h **** 
+  68:/usr/avr/include/stdlib.h **** /*@{*/
+  69:/usr/avr/include/stdlib.h **** /** Result type for function div(). */
+  70:/usr/avr/include/stdlib.h **** typedef struct {
+  71:/usr/avr/include/stdlib.h **** 	int quot;                   /**< The Quotient. */
+  72:/usr/avr/include/stdlib.h **** 	int rem;                    /**< The Remainder. */
+  73:/usr/avr/include/stdlib.h **** } div_t;
+  74:/usr/avr/include/stdlib.h **** 
+  75:/usr/avr/include/stdlib.h **** /** Result type for function ldiv(). */
+  76:/usr/avr/include/stdlib.h **** typedef struct {
+  77:/usr/avr/include/stdlib.h **** 	long quot;                  /**< The Quotient. */
+  78:/usr/avr/include/stdlib.h **** 	long rem;                   /**< The Remainder. */
+  79:/usr/avr/include/stdlib.h **** } ldiv_t;
+  80:/usr/avr/include/stdlib.h **** 
+  81:/usr/avr/include/stdlib.h **** /** Comparision function type for qsort(), just for convenience. */
+  82:/usr/avr/include/stdlib.h **** typedef int (*__compar_fn_t)(const void *, const void *);
+  83:/usr/avr/include/stdlib.h **** 
+  84:/usr/avr/include/stdlib.h **** #ifndef __DOXYGEN__
+  85:/usr/avr/include/stdlib.h **** 
+  86:/usr/avr/include/stdlib.h **** #ifndef __ATTR_CONST__
+  87:/usr/avr/include/stdlib.h **** # define __ATTR_CONST__ __attribute__((__const__))
+  88:/usr/avr/include/stdlib.h **** #endif
+  89:/usr/avr/include/stdlib.h **** 
+  90:/usr/avr/include/stdlib.h **** #ifndef __ATTR_MALLOC__
+  91:/usr/avr/include/stdlib.h **** # define __ATTR_MALLOC__ __attribute__((__malloc__))
+  92:/usr/avr/include/stdlib.h **** #endif
+  93:/usr/avr/include/stdlib.h **** 
+  94:/usr/avr/include/stdlib.h **** #ifndef __ATTR_NORETURN__
+  95:/usr/avr/include/stdlib.h **** # define __ATTR_NORETURN__ __attribute__((__noreturn__))
+  96:/usr/avr/include/stdlib.h **** #endif
+  97:/usr/avr/include/stdlib.h **** 
+  98:/usr/avr/include/stdlib.h **** #ifndef __ATTR_PURE__
+  99:/usr/avr/include/stdlib.h **** # define __ATTR_PURE__ __attribute__((__pure__))
+ 100:/usr/avr/include/stdlib.h **** #endif
+ 101:/usr/avr/include/stdlib.h **** 
+ 102:/usr/avr/include/stdlib.h **** #ifndef	__ATTR_GNU_INLINE__
+ 103:/usr/avr/include/stdlib.h **** # ifdef  __GNUC_STDC_INLINE__
+ 104:/usr/avr/include/stdlib.h **** #  define __ATTR_GNU_INLINE__   __attribute__((__gnu_inline__))
+ 105:/usr/avr/include/stdlib.h **** # else
+ 106:/usr/avr/include/stdlib.h **** #  define __ATTR_GNU_INLINE__
+ 107:/usr/avr/include/stdlib.h **** # endif
+ 108:/usr/avr/include/stdlib.h **** #endif
+ 109:/usr/avr/include/stdlib.h **** 
+ 110:/usr/avr/include/stdlib.h **** #endif
+ 111:/usr/avr/include/stdlib.h **** 
+ 112:/usr/avr/include/stdlib.h **** /** The abort() function causes abnormal program termination to occur.
+ 113:/usr/avr/include/stdlib.h ****     This realization disables interrupts and jumps to _exit() function
+ 114:/usr/avr/include/stdlib.h ****     with argument equal to 1. In the limited AVR environment, execution is
+ 115:/usr/avr/include/stdlib.h ****     effectively halted by entering an infinite loop. */
+ 116:/usr/avr/include/stdlib.h **** extern void abort(void) __ATTR_NORETURN__;
+ 117:/usr/avr/include/stdlib.h **** 
+ 118:/usr/avr/include/stdlib.h **** /** The abs() function computes the absolute value of the integer \c i.
+ 119:/usr/avr/include/stdlib.h ****    \note The abs() and labs() functions are builtins of gcc.
+ 120:/usr/avr/include/stdlib.h **** */
+ 121:/usr/avr/include/stdlib.h **** extern int abs(int __i) __ATTR_CONST__;
+ 122:/usr/avr/include/stdlib.h **** #ifndef __DOXYGEN__
+ 123:/usr/avr/include/stdlib.h **** #define	abs(__i) __builtin_abs(__i)
+ 124:/usr/avr/include/stdlib.h **** #endif
+ 125:/usr/avr/include/stdlib.h **** 
+ 126:/usr/avr/include/stdlib.h **** /** The labs() function computes the absolute value of the long integer
+ 127:/usr/avr/include/stdlib.h ****     \c i.
+ 128:/usr/avr/include/stdlib.h ****    \note The abs() and labs() functions are builtins of gcc.
+ 129:/usr/avr/include/stdlib.h **** */
+ 130:/usr/avr/include/stdlib.h **** extern long labs(long __i) __ATTR_CONST__;
+ 131:/usr/avr/include/stdlib.h **** #ifndef __DOXYGEN__
+ 132:/usr/avr/include/stdlib.h **** #define labs(__i) __builtin_labs(__i)
+ 133:/usr/avr/include/stdlib.h **** #endif
+ 134:/usr/avr/include/stdlib.h **** 
+ 135:/usr/avr/include/stdlib.h **** /**
+ 136:/usr/avr/include/stdlib.h ****      The bsearch() function searches an array of \c nmemb objects, the
+ 137:/usr/avr/include/stdlib.h ****      initial member of which is pointed to by \c base, for a member
+ 138:/usr/avr/include/stdlib.h ****      that matches the object pointed to by \c key.  The size of each
+ 139:/usr/avr/include/stdlib.h ****      member of the array is specified by \c size.
+ 140:/usr/avr/include/stdlib.h **** 
+ 141:/usr/avr/include/stdlib.h ****      The contents of the array should be in ascending sorted order
+ 142:/usr/avr/include/stdlib.h ****      according to the comparison function referenced by \c compar.
+ 143:/usr/avr/include/stdlib.h ****      The \c compar routine is expected to have two arguments which
+ 144:/usr/avr/include/stdlib.h ****      point to the key object and to an array member, in that order,
+ 145:/usr/avr/include/stdlib.h ****      and should return an integer less than, equal to, or greater than
+ 146:/usr/avr/include/stdlib.h ****      zero if the key object is found, respectively, to be less than,
+ 147:/usr/avr/include/stdlib.h ****      to match, or be greater than the array member.
+ 148:/usr/avr/include/stdlib.h **** 
+ 149:/usr/avr/include/stdlib.h ****      The bsearch() function returns a pointer to a matching member of
+ 150:/usr/avr/include/stdlib.h ****      the array, or a null pointer if no match is found.  If two
+ 151:/usr/avr/include/stdlib.h ****      members compare as equal, which member is matched is unspecified.
+ 152:/usr/avr/include/stdlib.h **** */
+ 153:/usr/avr/include/stdlib.h **** extern void *bsearch(const void *__key, const void *__base, size_t __nmemb,
+ 154:/usr/avr/include/stdlib.h **** 		     size_t __size, int (*__compar)(const void *, const void *));
+ 155:/usr/avr/include/stdlib.h **** 
+ 156:/usr/avr/include/stdlib.h **** /* __divmodhi4 and __divmodsi4 from libgcc.a */
+ 157:/usr/avr/include/stdlib.h **** /**
+ 158:/usr/avr/include/stdlib.h ****      The div() function computes the value \c num/denom and returns
+ 159:/usr/avr/include/stdlib.h ****      the quotient and remainder in a structure named \c div_t that
+ 160:/usr/avr/include/stdlib.h ****      contains two int members named \c quot and \c rem.
+ 161:/usr/avr/include/stdlib.h **** */
+ 162:/usr/avr/include/stdlib.h **** extern div_t div(int __num, int __denom) __asm__("__divmodhi4") __ATTR_CONST__;
+ 163:/usr/avr/include/stdlib.h **** /**
+ 164:/usr/avr/include/stdlib.h ****      The ldiv() function computes the value \c num/denom and returns
+ 165:/usr/avr/include/stdlib.h ****      the quotient and remainder in a structure named \c ldiv_t that
+ 166:/usr/avr/include/stdlib.h ****      contains two long integer members named \c quot and \c rem.
+ 167:/usr/avr/include/stdlib.h **** */
+ 168:/usr/avr/include/stdlib.h **** extern ldiv_t ldiv(long __num, long __denom) __asm__("__divmodsi4") __ATTR_CONST__;
+ 169:/usr/avr/include/stdlib.h **** 
+ 170:/usr/avr/include/stdlib.h **** /**
+ 171:/usr/avr/include/stdlib.h ****      The qsort() function is a modified partition-exchange sort, or
+ 172:/usr/avr/include/stdlib.h ****      quicksort.
+ 173:/usr/avr/include/stdlib.h **** 
+ 174:/usr/avr/include/stdlib.h ****      The qsort() function sorts an array of \c nmemb objects, the
+ 175:/usr/avr/include/stdlib.h ****      initial member of which is pointed to by \c base.  The size of
+ 176:/usr/avr/include/stdlib.h ****      each object is specified by \c size.  The contents of the array
+ 177:/usr/avr/include/stdlib.h ****      base are sorted in ascending order according to a comparison
+ 178:/usr/avr/include/stdlib.h ****      function pointed to by \c compar, which requires two arguments
+ 179:/usr/avr/include/stdlib.h ****      pointing to the objects being compared.
+ 180:/usr/avr/include/stdlib.h **** 
+ 181:/usr/avr/include/stdlib.h ****      The comparison function must return an integer less than, equal
+ 182:/usr/avr/include/stdlib.h ****      to, or greater than zero if the first argument is considered to
+ 183:/usr/avr/include/stdlib.h ****      be respectively less than, equal to, or greater than the second.
+ 184:/usr/avr/include/stdlib.h **** */
+ 185:/usr/avr/include/stdlib.h **** extern void qsort(void *__base, size_t __nmemb, size_t __size,
+ 186:/usr/avr/include/stdlib.h **** 		  __compar_fn_t __compar);
+ 187:/usr/avr/include/stdlib.h **** 
+ 188:/usr/avr/include/stdlib.h **** /**
+ 189:/usr/avr/include/stdlib.h ****     The strtol() function converts the string in \c nptr to a long
+ 190:/usr/avr/include/stdlib.h ****     value.  The conversion is done according to the given base, which
+ 191:/usr/avr/include/stdlib.h ****     must be between 2 and 36 inclusive, or be the special value 0.
+ 192:/usr/avr/include/stdlib.h **** 
+ 193:/usr/avr/include/stdlib.h ****     The string may begin with an arbitrary amount of white space (as
+ 194:/usr/avr/include/stdlib.h ****     determined by isspace()) followed by a single optional \c '+' or \c '-'
+ 195:/usr/avr/include/stdlib.h ****     sign.  If \c base is zero or 16, the string may then include a
+ 196:/usr/avr/include/stdlib.h ****     \c "0x" prefix, and the number will be read in base 16; otherwise,
+ 197:/usr/avr/include/stdlib.h ****     a zero base is taken as 10 (decimal) unless the next character is
+ 198:/usr/avr/include/stdlib.h ****     \c '0', in which case it is taken as 8 (octal).
+ 199:/usr/avr/include/stdlib.h **** 
+ 200:/usr/avr/include/stdlib.h ****     The remainder of the string is converted to a long value in the
+ 201:/usr/avr/include/stdlib.h ****     obvious manner, stopping at the first character which is not a
+ 202:/usr/avr/include/stdlib.h ****     valid digit in the given base.  (In bases above 10, the letter \c 'A'
+ 203:/usr/avr/include/stdlib.h ****     in either upper or lower case represents 10, \c 'B' represents 11,
+ 204:/usr/avr/include/stdlib.h ****     and so forth, with \c 'Z' representing 35.)
+ 205:/usr/avr/include/stdlib.h **** 
+ 206:/usr/avr/include/stdlib.h ****     If \c endptr is not NULL, strtol() stores the address of the first
+ 207:/usr/avr/include/stdlib.h ****     invalid character in \c *endptr.  If there were no digits at all,
+ 208:/usr/avr/include/stdlib.h ****     however, strtol() stores the original value of \c nptr in \c
+ 209:/usr/avr/include/stdlib.h ****     *endptr.  (Thus, if \c *nptr is not \c '\\0' but \c **endptr is \c '\\0'
+ 210:/usr/avr/include/stdlib.h ****     on return, the entire string was valid.)
+ 211:/usr/avr/include/stdlib.h **** 
+ 212:/usr/avr/include/stdlib.h ****     The strtol() function returns the result of the conversion, unless
+ 213:/usr/avr/include/stdlib.h ****     the value would underflow or overflow.  If no conversion could be
+ 214:/usr/avr/include/stdlib.h ****     performed, 0 is returned.  If an overflow or underflow occurs, \c
+ 215:/usr/avr/include/stdlib.h ****     errno is set to \ref avr_errno "ERANGE" and the function return value
+ 216:/usr/avr/include/stdlib.h ****     is clamped to \c LONG_MIN or \c LONG_MAX, respectively.
+ 217:/usr/avr/include/stdlib.h **** */
+ 218:/usr/avr/include/stdlib.h **** extern long strtol(const char *__nptr, char **__endptr, int __base);
+ 219:/usr/avr/include/stdlib.h **** 
+ 220:/usr/avr/include/stdlib.h **** /**
+ 221:/usr/avr/include/stdlib.h ****     The strtoul() function converts the string in \c nptr to an
+ 222:/usr/avr/include/stdlib.h ****     unsigned long value.  The conversion is done according to the
+ 223:/usr/avr/include/stdlib.h ****     given base, which must be between 2 and 36 inclusive, or be the
+ 224:/usr/avr/include/stdlib.h ****     special value 0.
+ 225:/usr/avr/include/stdlib.h **** 
+ 226:/usr/avr/include/stdlib.h ****     The string may begin with an arbitrary amount of white space (as
+ 227:/usr/avr/include/stdlib.h ****     determined by isspace()) followed by a single optional \c '+' or \c '-'
+ 228:/usr/avr/include/stdlib.h ****     sign.  If \c base is zero or 16, the string may then include a
+ 229:/usr/avr/include/stdlib.h ****     \c "0x" prefix, and the number will be read in base 16; otherwise,
+ 230:/usr/avr/include/stdlib.h ****     a zero base is taken as 10 (decimal) unless the next character is
+ 231:/usr/avr/include/stdlib.h ****     \c '0', in which case it is taken as 8 (octal).
+ 232:/usr/avr/include/stdlib.h **** 
+ 233:/usr/avr/include/stdlib.h ****     The remainder of the string is converted to an unsigned long value
+ 234:/usr/avr/include/stdlib.h ****     in the obvious manner, stopping at the first character which is
+ 235:/usr/avr/include/stdlib.h ****     not a valid digit in the given base.  (In bases above 10, the
+ 236:/usr/avr/include/stdlib.h ****     letter \c 'A' in either upper or lower case represents 10, \c 'B'
+ 237:/usr/avr/include/stdlib.h ****     represents 11, and so forth, with \c 'Z' representing 35.)
+ 238:/usr/avr/include/stdlib.h **** 
+ 239:/usr/avr/include/stdlib.h ****     If \c endptr is not NULL, strtoul() stores the address of the first
+ 240:/usr/avr/include/stdlib.h ****     invalid character in \c *endptr.  If there were no digits at all,
+ 241:/usr/avr/include/stdlib.h ****     however, strtoul() stores the original value of \c nptr in \c
+ 242:/usr/avr/include/stdlib.h ****     *endptr.  (Thus, if \c *nptr is not \c '\\0' but \c **endptr is \c '\\0'
+ 243:/usr/avr/include/stdlib.h ****     on return, the entire string was valid.)
+ 244:/usr/avr/include/stdlib.h **** 
+ 245:/usr/avr/include/stdlib.h ****     The strtoul() function return either the result of the conversion
+ 246:/usr/avr/include/stdlib.h ****     or, if there was a leading minus sign, the negation of the result
+ 247:/usr/avr/include/stdlib.h ****     of the conversion, unless the original (non-negated) value would
+ 248:/usr/avr/include/stdlib.h ****     overflow; in the latter case, strtoul() returns ULONG_MAX, and \c
+ 249:/usr/avr/include/stdlib.h ****     errno is set to \ref avr_errno "ERANGE".  If no conversion could 
+ 250:/usr/avr/include/stdlib.h ****     be performed, 0 is returned.
+ 251:/usr/avr/include/stdlib.h **** */
+ 252:/usr/avr/include/stdlib.h **** extern unsigned long strtoul(const char *__nptr, char **__endptr, int __base);
+ 253:/usr/avr/include/stdlib.h **** 
+ 254:/usr/avr/include/stdlib.h **** /**
+ 255:/usr/avr/include/stdlib.h ****     The atol() function converts the initial portion of the string
+ 256:/usr/avr/include/stdlib.h ****     pointed to by \p s to long integer representation. In contrast to
+ 257:/usr/avr/include/stdlib.h **** 
+ 258:/usr/avr/include/stdlib.h ****         \code strtol(s, (char **)NULL, 10); \endcode
+ 259:/usr/avr/include/stdlib.h **** 
+ 260:/usr/avr/include/stdlib.h ****     this function does not detect overflow (\c errno is not changed and
+ 261:/usr/avr/include/stdlib.h ****     the result value is not predictable), uses smaller memory (flash and
+ 262:/usr/avr/include/stdlib.h ****     stack) and works more quickly.
+ 263:/usr/avr/include/stdlib.h **** */
+ 264:/usr/avr/include/stdlib.h **** extern long atol(const char *__s) __ATTR_PURE__;
+ 265:/usr/avr/include/stdlib.h **** 
+ 266:/usr/avr/include/stdlib.h **** /**
+ 267:/usr/avr/include/stdlib.h ****     The atoi() function converts the initial portion of the string
+ 268:/usr/avr/include/stdlib.h ****     pointed to by \p s to integer representation. In contrast to
+ 269:/usr/avr/include/stdlib.h **** 
+ 270:/usr/avr/include/stdlib.h ****         \code (int)strtol(s, (char **)NULL, 10); \endcode
+ 271:/usr/avr/include/stdlib.h **** 
+ 272:/usr/avr/include/stdlib.h ****     this function does not detect overflow (\c errno is not changed and
+ 273:/usr/avr/include/stdlib.h ****     the result value is not predictable), uses smaller memory (flash and
+ 274:/usr/avr/include/stdlib.h ****     stack) and works more quickly.
+ 275:/usr/avr/include/stdlib.h **** */
+ 276:/usr/avr/include/stdlib.h **** extern int atoi(const char *__s) __ATTR_PURE__;
+ 277:/usr/avr/include/stdlib.h **** 
+ 278:/usr/avr/include/stdlib.h **** /**
+ 279:/usr/avr/include/stdlib.h ****    The exit() function terminates the application.  Since there is no
+ 280:/usr/avr/include/stdlib.h ****    environment to return to, \c status is ignored, and code execution
+ 281:/usr/avr/include/stdlib.h ****    will eventually reach an infinite loop, thereby effectively halting
+ 282:/usr/avr/include/stdlib.h ****    all code processing.  Before entering the infinite loop, interrupts
+ 283:/usr/avr/include/stdlib.h ****    are globally disabled.
+ 284:/usr/avr/include/stdlib.h **** 
+ 285:/usr/avr/include/stdlib.h ****    In a C++ context, global destructors will be called before halting
+ 286:/usr/avr/include/stdlib.h ****    execution.
+ 287:/usr/avr/include/stdlib.h **** */
+ 288:/usr/avr/include/stdlib.h **** extern void exit(int __status) __ATTR_NORETURN__;
+ 289:/usr/avr/include/stdlib.h **** 
+ 290:/usr/avr/include/stdlib.h **** /**
+ 291:/usr/avr/include/stdlib.h ****    The malloc() function allocates \c size bytes of memory.
+ 292:/usr/avr/include/stdlib.h ****    If malloc() fails, a NULL pointer is returned.
+ 293:/usr/avr/include/stdlib.h **** 
+ 294:/usr/avr/include/stdlib.h ****    Note that malloc() does \e not initialize the returned memory to
+ 295:/usr/avr/include/stdlib.h ****    zero bytes.
+ 296:/usr/avr/include/stdlib.h **** 
+ 297:/usr/avr/include/stdlib.h ****    See the chapter about \ref malloc "malloc() usage" for implementation
+ 298:/usr/avr/include/stdlib.h ****    details.
+ 299:/usr/avr/include/stdlib.h **** */
+ 300:/usr/avr/include/stdlib.h **** extern void *malloc(size_t __size) __ATTR_MALLOC__;
+ 301:/usr/avr/include/stdlib.h **** 
+ 302:/usr/avr/include/stdlib.h **** /**
+ 303:/usr/avr/include/stdlib.h ****    The free() function causes the allocated memory referenced by \c
+ 304:/usr/avr/include/stdlib.h ****    ptr to be made available for future allocations.  If \c ptr is
+ 305:/usr/avr/include/stdlib.h ****    NULL, no action occurs.
+ 306:/usr/avr/include/stdlib.h **** */
+ 307:/usr/avr/include/stdlib.h **** extern void free(void *__ptr);
+ 308:/usr/avr/include/stdlib.h **** 
+ 309:/usr/avr/include/stdlib.h **** /**
+ 310:/usr/avr/include/stdlib.h ****    \c malloc() \ref malloc_tunables "tunable".
+ 311:/usr/avr/include/stdlib.h **** */
+ 312:/usr/avr/include/stdlib.h **** extern size_t __malloc_margin;
+ 313:/usr/avr/include/stdlib.h **** 
+ 314:/usr/avr/include/stdlib.h **** /**
+ 315:/usr/avr/include/stdlib.h ****    \c malloc() \ref malloc_tunables "tunable".
+ 316:/usr/avr/include/stdlib.h **** */
+ 317:/usr/avr/include/stdlib.h **** extern char *__malloc_heap_start;
+ 318:/usr/avr/include/stdlib.h **** 
+ 319:/usr/avr/include/stdlib.h **** /**
+ 320:/usr/avr/include/stdlib.h ****    \c malloc() \ref malloc_tunables "tunable".
+ 321:/usr/avr/include/stdlib.h **** */
+ 322:/usr/avr/include/stdlib.h **** extern char *__malloc_heap_end;
+ 323:/usr/avr/include/stdlib.h **** 
+ 324:/usr/avr/include/stdlib.h **** /**
+ 325:/usr/avr/include/stdlib.h ****    Allocate \c nele elements of \c size each.  Identical to calling
+ 326:/usr/avr/include/stdlib.h ****    \c malloc() using <tt>nele * size</tt> as argument, except the
+ 327:/usr/avr/include/stdlib.h ****    allocated memory will be cleared to zero.
+ 328:/usr/avr/include/stdlib.h **** */
+ 329:/usr/avr/include/stdlib.h **** extern void *calloc(size_t __nele, size_t __size) __ATTR_MALLOC__;
+ 330:/usr/avr/include/stdlib.h **** 
+ 331:/usr/avr/include/stdlib.h **** /**
+ 332:/usr/avr/include/stdlib.h ****    The realloc() function tries to change the size of the region
+ 333:/usr/avr/include/stdlib.h ****    allocated at \c ptr to the new \c size value.  It returns a
+ 334:/usr/avr/include/stdlib.h ****    pointer to the new region.  The returned pointer might be the
+ 335:/usr/avr/include/stdlib.h ****    same as the old pointer, or a pointer to a completely different
+ 336:/usr/avr/include/stdlib.h ****    region.
+ 337:/usr/avr/include/stdlib.h **** 
+ 338:/usr/avr/include/stdlib.h ****    The contents of the returned region up to either the old or the new
+ 339:/usr/avr/include/stdlib.h ****    size value (whatever is less) will be identical to the contents of
+ 340:/usr/avr/include/stdlib.h ****    the old region, even in case a new region had to be allocated.
+ 341:/usr/avr/include/stdlib.h **** 
+ 342:/usr/avr/include/stdlib.h ****    It is acceptable to pass \c ptr as NULL, in which case realloc()
+ 343:/usr/avr/include/stdlib.h ****    will behave identical to malloc().
+ 344:/usr/avr/include/stdlib.h **** 
+ 345:/usr/avr/include/stdlib.h ****    If the new memory cannot be allocated, realloc() returns NULL, and
+ 346:/usr/avr/include/stdlib.h ****    the region at \c ptr will not be changed.
+ 347:/usr/avr/include/stdlib.h **** */
+ 348:/usr/avr/include/stdlib.h **** extern void *realloc(void *__ptr, size_t __size) __ATTR_MALLOC__;
+ 349:/usr/avr/include/stdlib.h **** 
+ 350:/usr/avr/include/stdlib.h **** extern double strtod(const char *__nptr, char **__endptr);
+ 351:/usr/avr/include/stdlib.h **** 
+ 352:/usr/avr/include/stdlib.h **** extern double atof(const char *__nptr);
+ 353:/usr/avr/include/stdlib.h **** 
+ 354:/usr/avr/include/stdlib.h **** /** Highest number that can be generated by rand(). */
+ 355:/usr/avr/include/stdlib.h **** #define	RAND_MAX 0x7FFF
+ 356:/usr/avr/include/stdlib.h **** 
+ 357:/usr/avr/include/stdlib.h **** /**
+ 358:/usr/avr/include/stdlib.h ****      The rand() function computes a sequence of pseudo-random integers in the
+ 359:/usr/avr/include/stdlib.h ****      range of 0 to \c RAND_MAX (as defined by the header file <stdlib.h>).
+ 360:/usr/avr/include/stdlib.h **** 
+ 361:/usr/avr/include/stdlib.h ****      The srand() function sets its argument \c seed as the seed for a new
+ 362:/usr/avr/include/stdlib.h ****      sequence of pseudo-random numbers to be returned by rand().  These
+ 363:/usr/avr/include/stdlib.h ****      sequences are repeatable by calling srand() with the same seed value.
+ 364:/usr/avr/include/stdlib.h **** 
+ 365:/usr/avr/include/stdlib.h ****      If no seed value is provided, the functions are automatically seeded with
+ 366:/usr/avr/include/stdlib.h ****      a value of 1.
+ 367:/usr/avr/include/stdlib.h **** 
+ 368:/usr/avr/include/stdlib.h ****      In compliance with the C standard, these functions operate on
+ 369:/usr/avr/include/stdlib.h ****      \c int arguments.  Since the underlying algorithm already uses
+ 370:/usr/avr/include/stdlib.h ****      32-bit calculations, this causes a loss of precision.  See
+ 371:/usr/avr/include/stdlib.h ****      \c random() for an alternate set of functions that retains full
+ 372:/usr/avr/include/stdlib.h ****      32-bit precision.
+ 373:/usr/avr/include/stdlib.h **** */
+ 374:/usr/avr/include/stdlib.h **** extern int rand(void);
+ 375:/usr/avr/include/stdlib.h **** /**
+ 376:/usr/avr/include/stdlib.h ****    Pseudo-random number generator seeding; see rand().
+ 377:/usr/avr/include/stdlib.h **** */
+ 378:/usr/avr/include/stdlib.h **** extern void srand(unsigned int __seed);
+ 379:/usr/avr/include/stdlib.h **** 
+ 380:/usr/avr/include/stdlib.h **** /**
+ 381:/usr/avr/include/stdlib.h ****    Variant of rand() that stores the context in the user-supplied
+ 382:/usr/avr/include/stdlib.h ****    variable located at \c ctx instead of a static library variable
+ 383:/usr/avr/include/stdlib.h ****    so the function becomes re-entrant.
+ 384:/usr/avr/include/stdlib.h **** */
+ 385:/usr/avr/include/stdlib.h **** extern int rand_r(unsigned long *__ctx);
+ 386:/usr/avr/include/stdlib.h **** /*@}*/
+ 387:/usr/avr/include/stdlib.h **** 
+ 388:/usr/avr/include/stdlib.h **** /*@{*/
+ 389:/usr/avr/include/stdlib.h **** /** \name Non-standard (i.e. non-ISO C) functions.
+ 390:/usr/avr/include/stdlib.h ****  \ingroup avr_stdlib
+ 391:/usr/avr/include/stdlib.h **** */
+ 392:/usr/avr/include/stdlib.h **** /**
+ 393:/usr/avr/include/stdlib.h ****    \brief Convert an integer to a string.
+ 394:/usr/avr/include/stdlib.h **** 
+ 395:/usr/avr/include/stdlib.h ****    The function itoa() converts the integer value from \c val into an
+ 396:/usr/avr/include/stdlib.h ****    ASCII representation that will be stored under \c s.  The caller
+ 397:/usr/avr/include/stdlib.h ****    is responsible for providing sufficient storage in \c s.
+ 398:/usr/avr/include/stdlib.h **** 
+ 399:/usr/avr/include/stdlib.h ****    \note The minimal size of the buffer \c s depends on the choice of
+ 400:/usr/avr/include/stdlib.h ****    radix. For example, if the radix is 2 (binary), you need to supply a buffer
+ 401:/usr/avr/include/stdlib.h ****    with a minimal length of 8 * sizeof (int) + 1 characters, i.e. one
+ 402:/usr/avr/include/stdlib.h ****    character for each bit plus one for the string terminator. Using a larger
+ 403:/usr/avr/include/stdlib.h ****    radix will require a smaller minimal buffer size.
+ 404:/usr/avr/include/stdlib.h **** 
+ 405:/usr/avr/include/stdlib.h ****    \warning If the buffer is too small, you risk a buffer overflow.
+ 406:/usr/avr/include/stdlib.h **** 
+ 407:/usr/avr/include/stdlib.h ****    Conversion is done using the \c radix as base, which may be a
+ 408:/usr/avr/include/stdlib.h ****    number between 2 (binary conversion) and up to 36.  If \c radix
+ 409:/usr/avr/include/stdlib.h ****    is greater than 10, the next digit after \c '9' will be the letter
+ 410:/usr/avr/include/stdlib.h ****    \c 'a'.
+ 411:/usr/avr/include/stdlib.h ****     
+ 412:/usr/avr/include/stdlib.h ****     If radix is 10 and val is negative, a minus sign will be prepended.
+ 413:/usr/avr/include/stdlib.h **** 
+ 414:/usr/avr/include/stdlib.h ****    The itoa() function returns the pointer passed as \c s.
+ 415:/usr/avr/include/stdlib.h **** */
+ 416:/usr/avr/include/stdlib.h **** #ifdef  __DOXYGEN__
+ 417:/usr/avr/include/stdlib.h **** extern char *itoa(int val, char *s, int radix);
+ 418:/usr/avr/include/stdlib.h **** #else
+ 419:/usr/avr/include/stdlib.h **** extern __inline__ __ATTR_GNU_INLINE__
+ 420:/usr/avr/include/stdlib.h **** char *itoa (int __val, char *__s, int __radix)
+ 852               		.loc 2 420 7 view .LVU217
+ 853               	.LBE24:
+ 421:/usr/avr/include/stdlib.h **** {
+ 422:/usr/avr/include/stdlib.h ****     if (!__builtin_constant_p (__radix)) {
+ 854               		.loc 2 422 5 view .LVU218
+ 423:/usr/avr/include/stdlib.h **** 	extern char *__itoa (int, char *, int);
+ 424:/usr/avr/include/stdlib.h **** 	return __itoa (__val, __s, __radix);
+ 425:/usr/avr/include/stdlib.h ****     } else if (__radix < 2 || __radix > 36) {
+ 855               		.loc 2 425 12 view .LVU219
+ 856               	.LBB26:
+ 857               	.LBB25:
+ 426:/usr/avr/include/stdlib.h **** 	*__s = 0;
+ 427:/usr/avr/include/stdlib.h **** 	return __s;
+ 428:/usr/avr/include/stdlib.h ****     } else {
+ 429:/usr/avr/include/stdlib.h **** 	extern char *__itoa_ncheck (int, char *, unsigned char);
+ 858               		.loc 2 429 2 view .LVU220
+ 430:/usr/avr/include/stdlib.h **** 	return __itoa_ncheck (__val, __s, __radix);
+ 859               		.loc 2 430 2 view .LVU221
+ 860               		.loc 2 430 9 is_stmt 0 view .LVU222
+ 861 0094 4AE0      		ldi r20,lo8(10)
+ 862 0096 6B2D      		mov r22,r11
+ 863 0098 7C2D      		mov r23,r12
+ 864 009a 90E0      		ldi r25,0
+ 865 009c 00D0      		rcall __itoa_ncheck
+ 866               	.LVL63:
+ 867               		.loc 2 430 9 view .LVU223
+ 868               	.LBE25:
+ 869               	.LBE26:
+  98:main.c        **** 				uart_transmit('\n');
+ 870               		.loc 1 98 5 view .LVU224
+ 871 009e 60E0      		ldi r22,lo8(gs(uart_transmit))
+ 872 00a0 70E0      		ldi r23,hi8(gs(uart_transmit))
+ 873 00a2 00C0      		rjmp .L59
+ 874               	.LVL64:
+ 875               	.L57:
+  97:main.c        **** 				outstr(itoa(iv, inbuf, 10), uart_transmit);
+ 876               		.loc 1 97 5 is_stmt 1 view .LVU225
+  97:main.c        **** 				outstr(itoa(iv, inbuf, 10), uart_transmit);
+ 877               		.loc 1 97 10 is_stmt 0 view .LVU226
+ 878 00a4 00D0      		rcall read_ana_comp
+ 879               	.LVL65:
+  97:main.c        **** 				outstr(itoa(iv, inbuf, 10), uart_transmit);
+ 880               		.loc 1 97 10 view .LVU227
+ 881 00a6 00C0      		rjmp .L58
+ 882               	.LVL66:
+ 883               	.L50:
+ 107:main.c        **** 				break;
+ 884               		.loc 1 107 5 is_stmt 1 view .LVU228
+ 885 00a8 682F      		mov r22,r24
+ 886 00aa 8D2D      		mov r24,r13
+ 887               	.LVL67:
+ 107:main.c        **** 				break;
+ 888               		.loc 1 107 5 is_stmt 0 view .LVU229
+ 889 00ac 00D0      		rcall setpwm
+ 890               	.LVL68:
+ 108:main.c        **** 		}
+ 891               		.loc 1 108 5 is_stmt 1 view .LVU230
+ 108:main.c        **** 		}
+ 892               		.loc 1 108 5 is_stmt 0 view .LVU231
+ 893 00ae 00C0      		rjmp .L45
+ 894               		.cfi_endproc
+ 895               	.LFE4:
+ 897               		.text
+ 898               	.Letext0:
+ 899               		.file 3 "/usr/avr/include/stdint.h"
+DEFINED SYMBOLS
+                            *ABS*:0000000000000000 main.c
+     /tmp/ccup2HIA.s:2      *ABS*:000000000000003d __SP_L__
+     /tmp/ccup2HIA.s:3      *ABS*:000000000000003f __SREG__
+     /tmp/ccup2HIA.s:4      *ABS*:0000000000000000 __tmp_reg__
+     /tmp/ccup2HIA.s:5      *ABS*:0000000000000001 __zero_reg__
+     /tmp/ccup2HIA.s:11     .text:0000000000000000 uart_receive
+     /tmp/ccup2HIA.s:36     .text:0000000000000008 uart_transmit
+     /tmp/ccup2HIA.s:61     .text:0000000000000010 read_ana_comp
+     /tmp/ccup2HIA.s:83     .text:000000000000001a setpwm
+     /tmp/ccup2HIA.s:237    .text:0000000000000086 rwpin
+     /tmp/ccup2HIA.s:455    .text:0000000000000148 outstr
+     /tmp/ccup2HIA.s:517    .text:000000000000016a instr
+     /tmp/ccup2HIA.s:656    .text.startup:0000000000000000 main
+
+UNDEFINED SYMBOLS
+atoi
+__itoa_ncheck
